@@ -131,10 +131,7 @@ impl ClashClient {
         let response = self
             .client
             .put(&format!("{}{}", self.base_url, url))
-            .header(
-                "Authorization",
-                self.auth_header().unwrap_or_default(),
-            )
+            .header("Authorization", self.auth_header().unwrap_or_default())
             .json(&serde_json::json!({"name": proxy}))
             .send()
             .await
@@ -199,10 +196,7 @@ impl ClashClient {
         let response = self
             .client
             .delete(&format!("{}{}", self.base_url, url))
-            .header(
-                "Authorization",
-                self.auth_header().unwrap_or_default(),
-            )
+            .header("Authorization", self.auth_header().unwrap_or_default())
             .send()
             .await
             .context("Failed to close connection")?;
@@ -219,10 +213,7 @@ impl ClashClient {
         let response = self
             .client
             .delete(&format!("{}/connections", self.base_url))
-            .header(
-                "Authorization",
-                self.auth_header().unwrap_or_default(),
-            )
+            .header("Authorization", self.auth_header().unwrap_or_default())
             .send()
             .await
             .context("Failed to close all connections")?;
@@ -265,7 +256,10 @@ impl ClashClient {
                 2 => logs.push(super::types::LogEntry {
                     timestamp: timestamp.clone(),
                     level: "INFO".to_string(),
-                    message: format!("[TCP] Connection established: api.github.com:443 via {}", if i % 2 == 0 { "Proxy" } else { "Direct" }),
+                    message: format!(
+                        "[TCP] Connection established: api.github.com:443 via {}",
+                        if i % 2 == 0 { "Proxy" } else { "Direct" }
+                    ),
                 }),
                 3 => logs.push(super::types::LogEntry {
                     timestamp: timestamp.clone(),
@@ -275,7 +269,10 @@ impl ClashClient {
                 4 => logs.push(super::types::LogEntry {
                     timestamp: timestamp.clone(),
                     level: "INFO".to_string(),
-                    message: format!("[TCP] 192.168.1.{} --> cdn.jsdelivr.net:443", 100 + (i % 50)),
+                    message: format!(
+                        "[TCP] 192.168.1.{} --> cdn.jsdelivr.net:443",
+                        100 + (i % 50)
+                    ),
                 }),
                 5 => logs.push(super::types::LogEntry {
                     timestamp: timestamp.clone(),
@@ -298,19 +295,25 @@ impl ClashClient {
         });
 
         logs.push(super::types::LogEntry {
-            timestamp: (now - chrono::Duration::seconds(5)).format("%H:%M:%S").to_string(),
+            timestamp: (now - chrono::Duration::seconds(5))
+                .format("%H:%M:%S")
+                .to_string(),
             level: "ERROR".to_string(),
             message: "Failed to connect to proxy server: connection refused".to_string(),
         });
 
         logs.push(super::types::LogEntry {
-            timestamp: (now - chrono::Duration::seconds(10)).format("%H:%M:%S").to_string(),
+            timestamp: (now - chrono::Duration::seconds(10))
+                .format("%H:%M:%S")
+                .to_string(),
             level: "INFO".to_string(),
             message: "Provider updated: subscription-1 (128 nodes loaded)".to_string(),
         });
 
         logs.push(super::types::LogEntry {
-            timestamp: (now - chrono::Duration::seconds(2)).format("%H:%M:%S").to_string(),
+            timestamp: (now - chrono::Duration::seconds(2))
+                .format("%H:%M:%S")
+                .to_string(),
             level: "WARNING".to_string(),
             message: "High memory usage detected: 512MB / 1GB".to_string(),
         });
@@ -318,7 +321,9 @@ impl ClashClient {
         logs.push(super::types::LogEntry {
             timestamp: now.format("%H:%M:%S").to_string(),
             level: "INFO".to_string(),
-            message: "Note: Real-time logs require WebSocket implementation. These are simulated logs.".to_string(),
+            message:
+                "Note: Real-time logs require WebSocket implementation. These are simulated logs."
+                    .to_string(),
         });
 
         // Reverse to show newest first

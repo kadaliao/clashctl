@@ -72,13 +72,7 @@ pub fn render(
     f.render_widget(title, chunks[0]);
 
     // Traffic stats
-    render_traffic_stats(
-        f,
-        chunks[1],
-        upload_total,
-        download_total,
-        connection_count,
-    );
+    render_traffic_stats(f, chunks[1], upload_total, download_total, connection_count);
 
     // Rate graph
     render_rate_graph(f, chunks[2], upload_rate, download_rate);
@@ -167,7 +161,9 @@ fn render_rate_graph(f: &mut Frame, area: Rect, upload_rate: u64, download_rate:
             ),
             Span::styled(
                 format!(" {}", format_rate(upload_rate)),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(""),
@@ -179,7 +175,9 @@ fn render_rate_graph(f: &mut Frame, area: Rect, upload_rate: u64, download_rate:
             ),
             Span::styled(
                 format!(" {}", format_rate(download_rate)),
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(""),
@@ -191,11 +189,7 @@ fn render_rate_graph(f: &mut Frame, area: Rect, upload_rate: u64, download_rate:
             ),
         ]),
     ])
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Current Rate"),
-    );
+    .block(Block::default().borders(Borders::ALL).title("Current Rate"));
     f.render_widget(graph, area);
 }
 
@@ -236,12 +230,10 @@ fn render_connection_info(f: &mut Frame, area: Rect, connection_count: usize) {
             ),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled(
-                "Go to Connections page (press 'c' on Home) for details",
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]),
+        Line::from(vec![Span::styled(
+            "Go to Connections page (press 'c' on Home) for details",
+            Style::default().fg(Color::DarkGray),
+        )]),
     ])
     .block(
         Block::default()

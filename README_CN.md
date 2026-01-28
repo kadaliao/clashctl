@@ -118,6 +118,21 @@ Home (主页)
  └── u → Update (订阅更新)
 ```
 
+### Update 页面
+
+用于更新订阅（Clash `proxy-providers` 与 Mihomo Party 订阅）。
+
+**快捷键**：
+```
+Enter        更新当前订阅
+u            更新所有订阅
+r            刷新订阅列表
+h            返回 Home
+g            跳转 Routes
+l            跳转 Rules
+q / Esc      退出
+```
+
 ### Preset 系统
 
 按 `Ctrl+P` 切换不同的使用场景：
@@ -229,6 +244,18 @@ y/n          确认/取消
 ```
 ~/.config/clashctl/config.yaml
 ```
+
+### 订阅配置发现
+
+Update 页面会尝试从以下位置读取订阅信息：
+
+- **Clash config**：`proxy-providers` 段落
+- **Mihomo Party**：`profile.yaml` + `profiles/<id>.yaml`
+
+可通过环境变量覆盖：
+
+- `CLASH_CONFIG_PATH` - 指定 Clash 配置文件路径
+- `CLASH_PARTY_DIR` - 指向 Mihomo Party 目录或其 `profile.yaml`
 
 ### 配置示例
 

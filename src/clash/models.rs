@@ -20,7 +20,10 @@ impl HumanRoute {
         for (name, proxy) in proxies {
             // Filter by proxy type - only show groups that user can interact with
             match proxy.proxy_type {
-                ProxyType::Selector | ProxyType::Smart | ProxyType::URLTest | ProxyType::LoadBalance => {
+                ProxyType::Selector
+                | ProxyType::Smart
+                | ProxyType::URLTest
+                | ProxyType::LoadBalance => {
                     let all_nodes = proxy.all.clone().unwrap_or_default();
 
                     // Show all groups including GLOBAL

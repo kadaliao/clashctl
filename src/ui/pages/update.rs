@@ -8,19 +8,47 @@ use ratatui::{
 
 use crate::app::AppState;
 
-pub fn render(f: &mut Frame, area: Rect, state: &AppState, providers: &[(String, String, Option<String>, usize, Option<String>)], selected_index: usize) {
+#[derive(Debug, Clone)]
+pub enum SubscriptionSource {
+    ClashProvider {
+        name: String,
+    },
+    MihomoPartyProfile {
+        id: String,
+        profile_path: std::path::PathBuf,
+        list_path: std::path::PathBuf,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct SubscriptionItem {
+    pub name: String,
+    pub provider_type: String,
+    pub url: Option<String>,
+    pub proxy_count: usize,
+    pub updated_at: Option<String>,
+    pub source: SubscriptionSource,
+}
+
+pub fn render(
+    f: &mut Frame,
+    area: Rect,
+    state: &AppState,
+    providers: &[SubscriptionItem],
+    selected_index: usize,
+) {
     let constraints = if state.status_message.is_some() {
         vec![
-            Constraint::Length(3),  // Title
-            Constraint::Length(3),  // Status message
-            Constraint::Min(0),     // Content
-            Constraint::Length(5),  // Help
+            Constraint::Length(3), // Title
+            Constraint::Length(3), // Status message
+            Constraint::Min(0),    // Content
+            Constraint::Length(5), // Help
         ]
     } else {
         vec![
-            Constraint::Length(3),  // Title
-            Constraint::Min(0),     // Content
-            Constraint::Length(5),  // Help
+            Constraint::Length(3), // Title
+            Constraint::Min(0),    // Content
+            Constraint::Length(5), // Help
         ]
     };
 
@@ -47,7 +75,11 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState, providers: &[(String,
 fn render_title(f: &mut Frame, area: Rect) {
     let title_text = "Subscription Management (订阅管理)";
     let title = Paragraph::new(title_text)
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(title, area);
@@ -61,34 +93,45 @@ fn render_status(f: &mut Frame, area: Rect, message: &str) {
     f.render_widget(status, area);
 }
 
-fn render_providers(f: &mut Frame, area: Rect, providers: &[(String, String, Option<String>, usize, Option<String>)], selected_index: usize) {
+fn render_providers(
+    f: &mut Frame,
+    area: Rect,
+    providers: &[SubscriptionItem],
+    selected_index: usize,
+) {
     if providers.is_empty() {
         let content = vec![
             Line::from(""),
-            Line::from(vec![
-                Span::styled("No Subscriptions Found", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            ]),
+            Line::from(vec![Span::styled(
+                "No Subscriptions Found",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )]),
             Line::from(""),
             Line::from("No proxy subscriptions (订阅) are configured in your Clash configuration."),
             Line::from(""),
-            Line::from(vec![
-                Span::styled("What are subscriptions?", Style::default().fg(Color::Cyan)),
-            ]),
+            Line::from(vec![Span::styled(
+                "What are subscriptions?",
+                Style::default().fg(Color::Cyan),
+            )]),
             Line::from("  Subscriptions are remote URLs provided by airport services (机场)."),
             Line::from("  They automatically fetch and update proxy server lists."),
             Line::from(""),
-            Line::from(vec![
-                Span::styled("To add subscriptions:", Style::default().fg(Color::Green)),
-            ]),
+            Line::from(vec![Span::styled(
+                "To add subscriptions:",
+                Style::default().fg(Color::Green),
+            )]),
             Line::from("  1. Get subscription URL from your airport provider"),
             Line::from("  2. Edit your Clash config file (config.yaml)"),
             Line::from("  3. Add a 'proxy-providers' section with your subscription URLs"),
             Line::from("  4. Restart Clash"),
             Line::from("  5. Press 'r' here to refresh"),
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Example:", Style::default().fg(Color::Magenta)),
-            ]),
+            Line::from(vec![Span::styled(
+                "Example:",
+                Style::default().fg(Color::Magenta),
+            )]),
             Line::from("  proxy-providers:"),
             Line::from("    my-airport:"),
             Line::from("      type: http"),
@@ -96,9 +139,11 @@ fn render_providers(f: &mut Frame, area: Rect, providers: &[(String, String, Opt
             Line::from("      interval: 3600"),
         ];
 
-        let paragraph = Paragraph::new(content)
-            .alignment(Alignment::Left)
-            .block(Block::default().borders(Borders::ALL).title("Subscriptions (订阅)"));
+        let paragraph = Paragraph::new(content).alignment(Alignment::Left).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Subscriptions (订阅)"),
+        );
 
         f.render_widget(paragraph, area);
         return;
@@ -108,18 +153,18 @@ fn render_providers(f: &mut Frame, area: Rect, providers: &[(String, String, Opt
     let items: Vec<ListItem> = providers
         .iter()
         .enumerate()
-        .map(|(idx, (name, ptype, url, proxy_count, updated_at))| {
-            let updated_str = if let Some(time) = updated_at {
+        .map(|(idx, item)| {
+            let updated_str = if let Some(time) = &item.updated_at {
                 format!("Updated: {}", time)
             } else {
                 "Never updated".to_string()
             };
 
-            let url_display = if let Some(u) = url {
+            let url_display = if let Some(u) = &item.url {
                 if u.len() > 80 {
                     format!("{}...", &u[..80])
                 } else {
-                    u.clone()
+                    u.to_string()
                 }
             } else {
                 "No URL".to_string()
@@ -130,23 +175,39 @@ fn render_providers(f: &mut Frame, area: Rect, providers: &[(String, String, Opt
             let line1 = Line::from(vec![
                 Span::styled(
                     if is_selected { "▶ " } else { "  " },
-                    Style::default().fg(if is_selected { Color::Yellow } else { Color::White }),
+                    Style::default().fg(if is_selected {
+                        Color::Yellow
+                    } else {
+                        Color::White
+                    }),
                 ),
                 Span::styled(
-                    name,
+                    &item.name,
                     Style::default()
-                        .fg(if is_selected { Color::Cyan } else { Color::White })
-                        .add_modifier(if is_selected { Modifier::BOLD } else { Modifier::empty() }),
+                        .fg(if is_selected {
+                            Color::Cyan
+                        } else {
+                            Color::White
+                        })
+                        .add_modifier(if is_selected {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("[{}]", ptype),
+                    format!("[{}]", item.provider_type),
                     Style::default().fg(Color::Green),
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("({} nodes)", proxy_count),
-                    Style::default().fg(if is_selected { Color::Yellow } else { Color::DarkGray }),
+                    format!("({} nodes)", item.proxy_count),
+                    Style::default().fg(if is_selected {
+                        Color::Yellow
+                    } else {
+                        Color::DarkGray
+                    }),
                 ),
             ]);
 
@@ -155,7 +216,11 @@ fn render_providers(f: &mut Frame, area: Rect, providers: &[(String, String, Opt
                 Span::styled("URL: ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     url_display,
-                    Style::default().fg(if is_selected { Color::Cyan } else { Color::DarkGray }),
+                    Style::default().fg(if is_selected {
+                        Color::Cyan
+                    } else {
+                        Color::DarkGray
+                    }),
                 ),
             ]);
 
@@ -168,12 +233,10 @@ fn render_providers(f: &mut Frame, area: Rect, providers: &[(String, String, Opt
         })
         .collect();
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!("Your Subscriptions (订阅) - {} total", providers.len())),
-        );
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(format!(
+        "Your Subscriptions (订阅) - {} total",
+        providers.len()
+    )));
 
     f.render_widget(list, area);
 }

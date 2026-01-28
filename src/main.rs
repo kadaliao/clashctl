@@ -43,8 +43,7 @@ async fn main() -> Result<()> {
     let _ = config.save();
 
     // Get preset
-    let preset = config::Preset::from_str(&config.current_preset)
-        .unwrap_or_default();
+    let preset = config::Preset::from_str(&config.current_preset).unwrap_or_default();
 
     // Test mode - just test connection and print info
     if cli.test {
@@ -52,7 +51,13 @@ async fn main() -> Result<()> {
     }
 
     // Start TUI
-    ui::run(config.api_url.clone(), config.secret.clone(), preset, &mut config).await?;
+    ui::run(
+        config.api_url.clone(),
+        config.secret.clone(),
+        preset,
+        &mut config,
+    )
+    .await?;
 
     Ok(())
 }

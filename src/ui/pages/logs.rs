@@ -66,15 +66,29 @@ pub fn render(
         .split(area);
 
     render_filter_bar(f, chunks[0], level_filter, search_query);
-    render_logs_list(f, chunks[1], logs, level_filter, search_query, scroll_offset);
+    render_logs_list(
+        f,
+        chunks[1],
+        logs,
+        level_filter,
+        search_query,
+        scroll_offset,
+    );
     render_help(f, chunks[2]);
 }
 
 fn render_filter_bar(f: &mut Frame, area: Rect, level_filter: LogLevel, search_query: &str) {
     let filter_text = if search_query.is_empty() {
-        format!("Filter: {} | Press 'f' to change filter, '/' to search", level_filter.as_str())
+        format!(
+            "Filter: {} | Press 'f' to change filter, '/' to search",
+            level_filter.as_str()
+        )
     } else {
-        format!("Filter: {} | Search: \"{}\" | Press ESC to clear", level_filter.as_str(), search_query)
+        format!(
+            "Filter: {} | Search: \"{}\" | Press ESC to clear",
+            level_filter.as_str(),
+            search_query
+        )
     };
 
     let filter = Paragraph::new(filter_text)
@@ -101,7 +115,10 @@ fn render_logs_list(
             let level_match = match level_filter {
                 LogLevel::All => true,
                 LogLevel::Info => log.level.to_uppercase().contains("INFO"),
-                LogLevel::Warning => log.level.to_uppercase().contains("WARNING") || log.level.to_uppercase().contains("WARN"),
+                LogLevel::Warning => {
+                    log.level.to_uppercase().contains("WARNING")
+                        || log.level.to_uppercase().contains("WARN")
+                }
                 LogLevel::Error => log.level.to_uppercase().contains("ERROR"),
             };
 
@@ -109,8 +126,13 @@ fn render_logs_list(
             let search_match = if search_query.is_empty() {
                 true
             } else {
-                log.message.to_lowercase().contains(&search_query.to_lowercase())
-                    || log.level.to_lowercase().contains(&search_query.to_lowercase())
+                log.message
+                    .to_lowercase()
+                    .contains(&search_query.to_lowercase())
+                    || log
+                        .level
+                        .to_lowercase()
+                        .contains(&search_query.to_lowercase())
             };
 
             level_match && search_match
@@ -144,7 +166,9 @@ fn render_logs_list(
                 ),
                 Span::styled(
                     format!("[{}] ", log.level),
-                    Style::default().fg(level_color).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(level_color)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(&log.message),
             ]);
@@ -156,7 +180,8 @@ fn render_logs_list(
     let title = if filtered_logs.is_empty() {
         "Logs (No logs available)".to_string()
     } else {
-        format!("Logs ({} entries, showing {}-{})",
+        format!(
+            "Logs ({} entries, showing {}-{})",
             filtered_logs.len(),
             scroll_offset + 1,
             (scroll_offset + visible_count).min(filtered_logs.len())

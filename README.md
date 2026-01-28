@@ -168,10 +168,12 @@ cargo build --release
 
 #### 4. Update 页面
 
-更新订阅配置。
+更新订阅配置（Clash proxy-providers 与 Mihomo Party 订阅）。
 
 **快捷键**:
+- `Enter` - 更新当前订阅
 - `u` - 更新所有 providers
+- `r` - 刷新订阅列表
 - `Ctrl+E` - 切换 Simple/Expert 模式
 - `h` - 返回 Home
 - `g` - 跳转 Routes
@@ -252,7 +254,7 @@ cargo build --release
 ./run.sh
 
 # 1. 按 u 进入 Update 页面
-# 2. 按 u 更新所有订阅
+# 2. 按 Enter 更新当前订阅 / 按 u 更新所有订阅
 # 3. 等待完成提示
 # ✅ 订阅已更新！
 ```
@@ -281,6 +283,18 @@ cargo build --release
 
 - API 地址: `http://127.0.0.1:9090`
 - Secret: 无（如果 Clash 有配置，需要提供）
+
+### 订阅配置发现
+
+Update 页面会尝试从以下位置读取订阅信息:
+
+- **Clash config**: `proxy-providers` 段落
+- **Mihomo Party**: `profile.yaml` + `profiles/<id>.yaml`
+
+可通过环境变量覆盖:
+
+- `CLASH_CONFIG_PATH` - 指定 Clash 配置文件路径
+- `CLASH_PARTY_DIR` - 指向 Mihomo Party 目录或其 `profile.yaml`
 
 ### 配置优先级
 

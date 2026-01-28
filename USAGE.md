@@ -93,27 +93,28 @@ cargo run -- --test --secret YOUR_SECRET
   ...
 ```
 
-## 快捷键
+## 订阅更新
 
-在 TUI 中:
-- `q` 或 `Esc` - 退出
-- `r` - 手动刷新状态
+Update 页面支持两类订阅来源：
+
+- Clash 配置中的 `proxy-providers`
+- Mihomo Party 的 `profile.yaml` + `profiles/<id>.yaml`
+
+快捷键：
+- `Enter` - 更新当前订阅
+- `u` - 更新所有订阅
+- `r` - 刷新订阅列表
+
+可通过环境变量覆盖订阅配置位置：
+
+- `CLASH_CONFIG_PATH` - 指定 Clash 配置文件路径
+- `CLASH_PARTY_DIR` - 指向 Mihomo Party 目录或其 `profile.yaml`
+
+## 快捷键（常用）
+
+- `q` / `Esc` - 返回/退出
+- `r` - 刷新状态
 - `Ctrl+C` - 强制退出
-- `g` - 跳转 Routes 页(未实现)
-- `m` - 切换场景(未实现)
-- `t` - 测速(未实现)
-
-## 项目状态
-
-当前版本: v0.1.0 (Phase 2 完成)
-
-已实现:
-- ✅ Home 页面
-- ✅ 状态显示
-- ✅ 错误提示
-- ✅ 自动刷新
-
-开发中:
-- ⏳ Routes 页面
-- ⏳ 线路切换
-- ⏳ 测速功能
+- `g` - Routes 页面
+- `m` - 切换模式
+- `u` - Update 页面

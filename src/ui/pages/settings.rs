@@ -28,9 +28,9 @@ pub fn render(
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Title
-            Constraint::Min(0),     // Settings options
-            Constraint::Length(5),  // Help
+            Constraint::Length(3), // Title
+            Constraint::Min(0),    // Settings options
+            Constraint::Length(5), // Help
         ])
         .split(area);
 
@@ -41,7 +41,11 @@ pub fn render(
 
 fn render_title(f: &mut Frame, area: Rect) {
     let title = Paragraph::new("Settings & Configuration")
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(title, area);
@@ -50,9 +54,12 @@ fn render_title(f: &mut Frame, area: Rect) {
 fn render_settings(f: &mut Frame, area: Rect, config: &AppConfig, action: &SettingsAction) {
     let mut lines = vec![
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Configuration Management", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Configuration Management",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
         Line::from(vec![
             Span::styled("  [e]", Style::default().fg(Color::Green)),
@@ -63,9 +70,10 @@ fn render_settings(f: &mut Frame, area: Rect, config: &AppConfig, action: &Setti
             Span::raw(" Import Configuration from File"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Current Configuration:", Style::default().fg(Color::Cyan)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Current Configuration:",
+            Style::default().fg(Color::Cyan),
+        )]),
         Line::from(vec![
             Span::raw("  API URL: "),
             Span::styled(&config.api_url, Style::default().fg(Color::Yellow)),
@@ -73,8 +81,16 @@ fn render_settings(f: &mut Frame, area: Rect, config: &AppConfig, action: &Setti
         Line::from(vec![
             Span::raw("  Secret: "),
             Span::styled(
-                if config.secret.is_some() { "✓ Configured" } else { "Not set" },
-                if config.secret.is_some() { Color::Green } else { Color::Gray }
+                if config.secret.is_some() {
+                    "✓ Configured"
+                } else {
+                    "Not set"
+                },
+                if config.secret.is_some() {
+                    Color::Green
+                } else {
+                    Color::Gray
+                },
             ),
         ]),
         Line::from(vec![
@@ -83,15 +99,24 @@ fn render_settings(f: &mut Frame, area: Rect, config: &AppConfig, action: &Setti
         ]),
         Line::from(vec![
             Span::raw("  Whitelist Rules: "),
-            Span::styled(config.whitelist.len().to_string(), Style::default().fg(Color::Green)),
+            Span::styled(
+                config.whitelist.len().to_string(),
+                Style::default().fg(Color::Green),
+            ),
         ]),
         Line::from(vec![
             Span::raw("  Blacklist Rules: "),
-            Span::styled(config.blacklist.len().to_string(), Style::default().fg(Color::Red)),
+            Span::styled(
+                config.blacklist.len().to_string(),
+                Style::default().fg(Color::Red),
+            ),
         ]),
         Line::from(vec![
             Span::raw("  Favorite Nodes: "),
-            Span::styled(config.favorite_nodes.len().to_string(), Style::default().fg(Color::Yellow)),
+            Span::styled(
+                config.favorite_nodes.len().to_string(),
+                Style::default().fg(Color::Yellow),
+            ),
         ]),
         Line::from(""),
     ];
@@ -103,26 +128,34 @@ fn render_settings(f: &mut Frame, area: Rect, config: &AppConfig, action: &Setti
                 Span::styled("Export Path: ", Style::default().fg(Color::Yellow)),
                 Span::raw("~/.config/clashctl/clashctl-export.yaml"),
             ]));
-            lines.push(Line::from(vec![
-                Span::styled("Press 'y' to confirm export", Style::default().fg(Color::Green)),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "Press 'y' to confirm export",
+                Style::default().fg(Color::Green),
+            )]));
         }
         SettingsAction::ImportPrompt => {
             lines.push(Line::from(vec![
                 Span::styled("Import Path: ", Style::default().fg(Color::Yellow)),
                 Span::raw("~/.config/clashctl/clashctl-import.yaml"),
             ]));
-            lines.push(Line::from(vec![
-                Span::styled("Press 'y' to confirm import (will restart app)", Style::default().fg(Color::Red)),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("Warning: Current config will be replaced!", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "Press 'y' to confirm import (will restart app)",
+                Style::default().fg(Color::Red),
+            )]));
+            lines.push(Line::from(vec![Span::styled(
+                "Warning: Current config will be replaced!",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            )]));
         }
         SettingsAction::ExportSuccess(path) => {
             lines.push(Line::from(vec![
                 Span::styled("✓ ", Style::default().fg(Color::Green)),
-                Span::styled("Configuration exported successfully!", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Configuration exported successfully!",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ]));
             lines.push(Line::from(vec![
                 Span::raw("  Location: "),
@@ -132,16 +165,24 @@ fn render_settings(f: &mut Frame, area: Rect, config: &AppConfig, action: &Setti
         SettingsAction::ImportSuccess => {
             lines.push(Line::from(vec![
                 Span::styled("✓ ", Style::default().fg(Color::Green)),
-                Span::styled("Configuration imported successfully!", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Configuration imported successfully!",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ]));
-            lines.push(Line::from(vec![
-                Span::raw("  Please restart the application to apply changes"),
-            ]));
+            lines.push(Line::from(vec![Span::raw(
+                "  Please restart the application to apply changes",
+            )]));
         }
         SettingsAction::Error(err) => {
             lines.push(Line::from(vec![
                 Span::styled("✗ ", Style::default().fg(Color::Red)),
-                Span::styled("Error:", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Error:",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
             ]));
             lines.push(Line::from(vec![
                 Span::raw("  "),

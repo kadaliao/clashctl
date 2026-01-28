@@ -1,5 +1,6 @@
-pub mod preset;
 pub mod clash_config;
+pub mod mihomo_party;
+pub mod preset;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -7,9 +8,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-pub use preset::Preset;
-pub use clash_config::ClashConfig;
 use crate::ui::theme::Theme;
+pub use clash_config::ClashConfig;
+pub use preset::Preset;
 
 /// Node group definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +53,10 @@ pub struct AppConfig {
     /// UI theme
     #[serde(default)]
     pub theme: String,
+
+    /// Cached Clash config path (for subscriptions)
+    #[serde(default)]
+    pub clash_config_path: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -66,6 +71,7 @@ impl Default for AppConfig {
             favorite_nodes: Vec::new(),
             node_groups: HashMap::new(),
             theme: "dark".to_string(),
+            clash_config_path: None,
         }
     }
 }
@@ -73,8 +79,8 @@ impl Default for AppConfig {
 impl AppConfig {
     /// Get the default config file path
     pub fn default_path() -> Result<PathBuf> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
+        let config_dir =
+            dirs::config_dir().ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
 
         let clashctl_dir = config_dir.join("clashctl");
         Ok(clashctl_dir.join("config.yaml"))
@@ -216,7 +222,9 @@ impl AppConfig {
 
     /// Add node to a group
     pub fn add_node_to_group(&mut self, group_name: &str, node: String) -> Result<()> {
-        let group = self.node_groups.get_mut(group_name)
+        let group = self
+            .node_groups
+            .get_mut(group_name)
             .ok_or_else(|| anyhow::anyhow!("Group '{}' not found", group_name))?;
 
         if !group.contains(&node) {
@@ -228,7 +236,9 @@ impl AppConfig {
 
     /// Remove node from a group
     pub fn remove_node_from_group(&mut self, group_name: &str, node: &str) -> Result<()> {
-        let group = self.node_groups.get_mut(group_name)
+        let group = self
+            .node_groups
+            .get_mut(group_name)
             .ok_or_else(|| anyhow::anyhow!("Group '{}' not found", group_name))?;
 
         group.retain(|n| n != node);

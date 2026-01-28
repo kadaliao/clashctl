@@ -7,8 +7,8 @@ use ratatui::{
 };
 
 use crate::app::AppState;
-use crate::config::AppConfig;
 use crate::clash::Rule;
+use crate::config::AppConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RuleEditMode {
@@ -70,7 +70,14 @@ pub fn render(
     }
 
     // Always show all rules (expert mode)
-    render_all_rules(f, chunks[chunk_idx], state, scroll_offset, search_query, rules);
+    render_all_rules(
+        f,
+        chunks[chunk_idx],
+        state,
+        scroll_offset,
+        search_query,
+        rules,
+    );
     chunk_idx += 1;
 
     render_help(f, chunks[chunk_idx], search_mode, edit_mode);
@@ -79,7 +86,11 @@ pub fn render(
 fn render_title(f: &mut Frame, area: Rect) {
     let title_text = "Rules Management (规则管理)";
     let title = Paragraph::new(title_text)
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(title, area);
@@ -93,20 +104,31 @@ fn render_status(f: &mut Frame, area: Rect, message: &str) {
     f.render_widget(status, area);
 }
 
-fn render_all_rules(f: &mut Frame, area: Rect, _state: &AppState, scroll_offset: usize, search_query: &str, rules: &[Rule]) {
+fn render_all_rules(
+    f: &mut Frame,
+    area: Rect,
+    _state: &AppState,
+    scroll_offset: usize,
+    search_query: &str,
+    rules: &[Rule],
+) {
     let available_width = area.width.saturating_sub(4) as usize; // Subtract borders and padding
     if rules.is_empty() {
         let content = vec![
             Line::from(""),
-            Line::from(vec![
-                Span::styled("No Rules Loaded", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            ]),
+            Line::from(vec![Span::styled(
+                "No Rules Loaded",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )]),
             Line::from(""),
             Line::from("Failed to load rules from Clash API."),
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Troubleshooting:", Style::default().fg(Color::Cyan)),
-            ]),
+            Line::from(vec![Span::styled(
+                "Troubleshooting:",
+                Style::default().fg(Color::Cyan),
+            )]),
             Line::from("  • Make sure Clash is running"),
             Line::from("  • Check the API connection settings"),
             Line::from("  • Try refreshing with 'r' key"),
@@ -139,9 +161,10 @@ fn render_all_rules(f: &mut Frame, area: Rect, _state: &AppState, scroll_offset:
         let message = format!("No rules matching '{}'", search_query);
         let content = vec![
             Line::from(""),
-            Line::from(vec![
-                Span::styled(message, Style::default().fg(Color::Yellow)),
-            ]),
+            Line::from(vec![Span::styled(
+                message,
+                Style::default().fg(Color::Yellow),
+            )]),
         ];
         let paragraph = Paragraph::new(content)
             .alignment(Alignment::Center)
@@ -190,7 +213,10 @@ fn render_all_rules(f: &mut Frame, area: Rect, _state: &AppState, scroll_offset:
 
             // Format payload (truncate if needed, no padding)
             let payload_str = if rule.payload.len() > payload_max_width {
-                format!("{}...", &rule.payload[..payload_max_width.saturating_sub(3)])
+                format!(
+                    "{}...",
+                    &rule.payload[..payload_max_width.saturating_sub(3)]
+                )
             } else {
                 rule.payload.clone()
             };
@@ -204,19 +230,15 @@ fn render_all_rules(f: &mut Frame, area: Rect, _state: &AppState, scroll_offset:
             };
 
             let line = Line::from(vec![
-                Span::styled(
-                    rule_type_str,
-                    Style::default().fg(rule_type_color),
-                ),
+                Span::styled(rule_type_str, Style::default().fg(rule_type_color)),
                 Span::raw(" "),
-                Span::styled(
-                    payload_str,
-                    Style::default().fg(Color::White),
-                ),
+                Span::styled(payload_str, Style::default().fg(Color::White)),
                 Span::raw(" → "),
                 Span::styled(
                     proxy_str,
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]);
             ListItem::new(line)
@@ -224,13 +246,20 @@ fn render_all_rules(f: &mut Frame, area: Rect, _state: &AppState, scroll_offset:
         .collect();
 
     let title = if search_query.is_empty() {
-        format!("All Rules - {} total (offset: {})", filtered_rules.len(), scroll_offset)
+        format!(
+            "All Rules - {} total (offset: {})",
+            filtered_rules.len(),
+            scroll_offset
+        )
     } else {
-        format!("Filtered Rules - {} matches (offset: {})", filtered_rules.len(), scroll_offset)
+        format!(
+            "Filtered Rules - {} matches (offset: {})",
+            filtered_rules.len(),
+            scroll_offset
+        )
     };
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(title));
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
 
     f.render_widget(list, area);
 }
@@ -286,7 +315,11 @@ fn render_search_input(f: &mut Frame, area: Rect, search_query: &str) {
 
     let search_widget = Paragraph::new(search_text)
         .alignment(Alignment::Left)
-        .block(Block::default().borders(Borders::ALL).title("Search (Type/Payload/Proxy)"));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Search (Type/Payload/Proxy)"),
+        );
 
     f.render_widget(search_widget, area);
 }

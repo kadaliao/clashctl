@@ -11,16 +11,16 @@ use crate::app::AppState;
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let constraints = if state.status_message.is_some() {
         vec![
-            Constraint::Length(5),  // Status box
-            Constraint::Length(3),  // Status message
-            Constraint::Min(0),     // Quick actions
-            Constraint::Length(3),  // Help
+            Constraint::Length(5), // Status box
+            Constraint::Length(3), // Status message
+            Constraint::Min(0),    // Quick actions
+            Constraint::Length(3), // Help
         ]
     } else {
         vec![
-            Constraint::Length(5),  // Status box
-            Constraint::Min(0),     // Quick actions
-            Constraint::Length(3),  // Help
+            Constraint::Length(5), // Status box
+            Constraint::Min(0),    // Quick actions
+            Constraint::Length(3), // Help
         ]
     };
 
@@ -94,7 +94,12 @@ fn render_status(f: &mut Frame, area: Rect, state: &AppState) {
             };
             lines.push(Line::from(vec![
                 Span::raw("Speed: "),
-                Span::styled(delay_text, Style::default().fg(delay_color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    delay_text,
+                    Style::default()
+                        .fg(delay_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ]));
         }
     }
@@ -104,9 +109,7 @@ fn render_status(f: &mut Frame, area: Rect, state: &AppState) {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "⚠ Connection Error:",
-            Style::default()
-                .fg(Color::Red)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         )));
 
         // Parse error and provide helpful hints

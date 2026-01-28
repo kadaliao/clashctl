@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 #[derive(Debug, Clone)]
 pub struct DelayTestResult {
     pub node: String,
-    pub delay: Option<u32>,  // None if test failed
+    pub delay: Option<u32>, // None if test failed
 }
 
 /// Delay test result
@@ -60,7 +60,10 @@ impl AppState {
 
     /// Select a proxy for a selector group
     pub async fn select_proxy(&mut self, selector: &str, proxy: &str) -> Result<()> {
-        self.clash_state.client.select_proxy(selector, proxy).await?;
+        self.clash_state
+            .client
+            .select_proxy(selector, proxy)
+            .await?;
         self.status_message = Some(format!("Switched {} to {}", selector, proxy));
         // Refresh to get updated state
         let _ = self.refresh().await;
@@ -82,11 +85,9 @@ impl AppState {
 
         // Spawn background task
         tokio::spawn(async move {
-            let result = client.test_delay(
-                &proxy_name,
-                Some("https://www.google.com"),
-                Some(5000)
-            ).await;
+            let result = client
+                .test_delay(&proxy_name, Some("https://www.google.com"), Some(5000))
+                .await;
 
             let delay = result.ok().map(|r| r.delay);
 
@@ -106,10 +107,13 @@ impl AppState {
 
             // Update cache if test succeeded
             if let Some(delay) = result.delay {
-                self.delay_cache.insert(result.node.clone(), DelayResult {
-                    delay,
-                    tested_at: Instant::now(),
-                });
+                self.delay_cache.insert(
+                    result.node.clone(),
+                    DelayResult {
+                        delay,
+                        tested_at: Instant::now(),
+                    },
+                );
 
                 // Update status message
                 let status = if delay < 200 {
@@ -151,7 +155,14 @@ impl AppState {
     /// Check if a node is testable (not Direct/Reject type)
     pub fn is_node_testable(&self, node_name: &str) -> bool {
         if let Some(proxy) = self.clash_state.proxies.get(node_name) {
-            !matches!(proxy.proxy_type, ProxyType::Direct | ProxyType::Reject | ProxyType::RejectDrop | ProxyType::Compatible | ProxyType::Pass)
+            !matches!(
+                proxy.proxy_type,
+                ProxyType::Direct
+                    | ProxyType::Reject
+                    | ProxyType::RejectDrop
+                    | ProxyType::Compatible
+                    | ProxyType::Pass
+            )
         } else {
             // If we can't find the proxy, assume it's testable
             // This handles cases where the node name might be in a nested structure

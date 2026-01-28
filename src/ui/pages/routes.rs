@@ -10,7 +10,13 @@ use crate::app::{AppState, Mode};
 use crate::clash::HumanRoute;
 use crate::config::{AppConfig, Preset};
 
-pub fn render(f: &mut Frame, area: Rect, state: &AppState, config: &AppConfig, selected_index: usize) {
+pub fn render(
+    f: &mut Frame,
+    area: Rect,
+    state: &AppState,
+    config: &AppConfig,
+    selected_index: usize,
+) {
     render_normal_view(f, area, state, config, selected_index);
 }
 
@@ -25,19 +31,25 @@ pub fn render_with_nodes(
     render_expanded_view(f, area, state, config, route_index, node_index);
 }
 
-fn render_normal_view(f: &mut Frame, area: Rect, state: &AppState, _config: &AppConfig, selected_index: usize) {
+fn render_normal_view(
+    f: &mut Frame,
+    area: Rect,
+    state: &AppState,
+    _config: &AppConfig,
+    selected_index: usize,
+) {
     let constraints = if state.status_message.is_some() {
         vec![
-            Constraint::Length(3),  // Title
-            Constraint::Length(3),  // Status message
-            Constraint::Min(0),     // Route list
-            Constraint::Length(3),  // Help
+            Constraint::Length(3), // Title
+            Constraint::Length(3), // Status message
+            Constraint::Min(0),    // Route list
+            Constraint::Length(3), // Help
         ]
     } else {
         vec![
-            Constraint::Length(3),  // Title
-            Constraint::Min(0),     // Route list
-            Constraint::Length(3),  // Help
+            Constraint::Length(3), // Title
+            Constraint::Min(0),    // Route list
+            Constraint::Length(3), // Help
         ]
     };
 
@@ -71,16 +83,16 @@ fn render_expanded_view(
 ) {
     let constraints = if state.status_message.is_some() {
         vec![
-            Constraint::Length(3),  // Title
-            Constraint::Length(3),  // Status message
-            Constraint::Min(0),     // Node list
-            Constraint::Length(4),  // Help
+            Constraint::Length(3), // Title
+            Constraint::Length(3), // Status message
+            Constraint::Min(0),    // Node list
+            Constraint::Length(4), // Help
         ]
     } else {
         vec![
-            Constraint::Length(3),  // Title
-            Constraint::Min(0),     // Node list
-            Constraint::Length(4),  // Help
+            Constraint::Length(3), // Title
+            Constraint::Min(0),    // Node list
+            Constraint::Length(4), // Help
         ]
     };
 
@@ -112,7 +124,11 @@ fn render_title(f: &mut Frame, area: Rect, _mode: Mode, preset: &Preset, expande
     };
 
     let title = Paragraph::new(title_text)
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(title, area);
@@ -158,7 +174,10 @@ fn render_routes(f: &mut Frame, area: Rect, state: &AppState, selected_index: us
                     Span::raw(" → "),
                     Span::styled(current_display, Style::default().fg(Color::Green)),
                     Span::raw(node_count),
-                    Span::styled(" [Enter to view nodes]", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        " [Enter to view nodes]",
+                        Style::default().fg(Color::DarkGray),
+                    ),
                 ])
             } else {
                 Line::from(vec![
@@ -174,12 +193,11 @@ fn render_routes(f: &mut Frame, area: Rect, state: &AppState, selected_index: us
         })
         .collect();
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(format!(
-            "Routes ({}/{}) - Press Enter to view nodes",
-            selected_index + 1,
-            routes.len()
-        )));
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(format!(
+        "Routes ({}/{}) - Press Enter to view nodes",
+        selected_index + 1,
+        routes.len()
+    )));
 
     f.render_widget(list, area);
 }
@@ -220,18 +238,26 @@ fn render_nodes(
             let is_favorite = config.is_favorite(node);
 
             let (prefix, style) = if is_selected && is_current {
-                ("▶ ✓ ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+                (
+                    "▶ ✓ ",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                )
             } else if is_selected {
-                ("▶   ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                (
+                    "▶   ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
             } else if is_current {
                 ("  ✓ ", Style::default().fg(Color::Green))
             } else {
                 ("    ", Style::default().fg(Color::White))
             };
 
-            let mut spans = vec![
-                Span::styled(prefix, style),
-            ];
+            let mut spans = vec![Span::styled(prefix, style)];
 
             // Add favorite indicator
             if is_favorite {
@@ -242,7 +268,10 @@ fn render_nodes(
 
             // Show delay info if available
             if is_testing {
-                spans.push(Span::styled(" [Testing...]", Style::default().fg(Color::Yellow)));
+                spans.push(Span::styled(
+                    " [Testing...]",
+                    Style::default().fg(Color::Yellow),
+                ));
             } else if let Some(delay_result) = cached_delay {
                 let delay = delay_result.delay;
                 let delay_style = if delay < 200 {
@@ -285,8 +314,7 @@ fn render_nodes(
         )
     };
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(title_text));
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title_text));
 
     f.render_widget(list, area);
 }

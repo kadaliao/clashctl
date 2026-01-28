@@ -21,18 +21,18 @@ pub fn render(
 ) {
     let constraints = if search_mode {
         vec![
-            Constraint::Length(3),  // Title
-            Constraint::Length(3),  // Stats
-            Constraint::Length(3),  // Search input
-            Constraint::Min(0),     // Connection list
-            Constraint::Length(5),  // Help
+            Constraint::Length(3), // Title
+            Constraint::Length(3), // Stats
+            Constraint::Length(3), // Search input
+            Constraint::Min(0),    // Connection list
+            Constraint::Length(5), // Help
         ]
     } else {
         vec![
-            Constraint::Length(3),  // Title
-            Constraint::Length(3),  // Stats
-            Constraint::Min(0),     // Connection list
-            Constraint::Length(5),  // Help
+            Constraint::Length(3), // Title
+            Constraint::Length(3), // Stats
+            Constraint::Min(0),    // Connection list
+            Constraint::Length(5), // Help
         ]
     };
 
@@ -53,7 +53,14 @@ pub fn render(
         chunk_idx += 1;
     }
 
-    render_connections(f, chunks[chunk_idx], connections, selected_index, scroll_offset, search_query);
+    render_connections(
+        f,
+        chunks[chunk_idx],
+        connections,
+        selected_index,
+        scroll_offset,
+        search_query,
+    );
     chunk_idx += 1;
 
     render_help(f, chunks[chunk_idx], search_mode);
@@ -61,7 +68,11 @@ pub fn render(
 
 fn render_title(f: &mut Frame, area: Rect) {
     let title = Paragraph::new("Active Connections")
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(title, area);
@@ -82,18 +93,14 @@ fn render_stats(f: &mut Frame, area: Rect, connections: Option<&ConnectionsRespo
         Span::raw("Total: "),
         Span::styled(
             format!("{}", count),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  |  Upload: "),
-        Span::styled(
-            upload,
-            Style::default().fg(Color::Yellow),
-        ),
+        Span::styled(upload, Style::default().fg(Color::Yellow)),
         Span::raw("  |  Download: "),
-        Span::styled(
-            download,
-            Style::default().fg(Color::Cyan),
-        ),
+        Span::styled(download, Style::default().fg(Color::Cyan)),
     ]);
 
     let widget = Paragraph::new(stats)
@@ -119,7 +126,11 @@ fn render_search_input(f: &mut Frame, area: Rect, search_query: &str) {
 
     let search_widget = Paragraph::new(search_text)
         .alignment(Alignment::Left)
-        .block(Block::default().borders(Borders::ALL).title("Search (Host/IP/Chain)"));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Search (Host/IP/Chain)"),
+        );
 
     f.render_widget(search_widget, area);
 }
@@ -134,12 +145,10 @@ fn render_connections(
 ) {
     let items: Vec<ListItem> = if let Some(conn) = connections {
         if conn.connections.is_empty() {
-            vec![ListItem::new(Line::from(vec![
-                Span::styled(
-                    "No active connections",
-                    Style::default().fg(Color::Gray),
-                ),
-            ]))]
+            vec![ListItem::new(Line::from(vec![Span::styled(
+                "No active connections",
+                Style::default().fg(Color::Gray),
+            )]))]
         } else {
             // Filter connections based on search query
             let filtered: Vec<(usize, &Connection)> = if search_query.is_empty() {
@@ -159,12 +168,22 @@ fn render_connections(
                         }
 
                         // Search in destination IP
-                        if connection.metadata.destination_ip.to_lowercase().contains(&query_lower) {
+                        if connection
+                            .metadata
+                            .destination_ip
+                            .to_lowercase()
+                            .contains(&query_lower)
+                        {
                             return true;
                         }
 
                         // Search in source IP
-                        if connection.metadata.source_ip.to_lowercase().contains(&query_lower) {
+                        if connection
+                            .metadata
+                            .source_ip
+                            .to_lowercase()
+                            .contains(&query_lower)
+                        {
                             return true;
                         }
 
@@ -181,44 +200,46 @@ fn render_connections(
             };
 
             if filtered.is_empty() {
-                vec![ListItem::new(Line::from(vec![
-                    Span::styled(
-                        format!("No connections matching '{}'", search_query),
-                        Style::default().fg(Color::Yellow),
-                    ),
-                ]))]
+                vec![ListItem::new(Line::from(vec![Span::styled(
+                    format!("No connections matching '{}'", search_query),
+                    Style::default().fg(Color::Yellow),
+                )]))]
             } else {
                 filtered
                     .iter()
                     .skip(scroll_offset)
-                    .map(|(idx, connection)| render_connection_item(connection, *idx == selected_index))
+                    .map(|(idx, connection)| {
+                        render_connection_item(connection, *idx == selected_index)
+                    })
                     .collect()
             }
         }
     } else {
-        vec![ListItem::new(Line::from(vec![
-            Span::styled(
-                "Loading connections...",
-                Style::default().fg(Color::Yellow),
-            ),
-        ]))]
+        vec![ListItem::new(Line::from(vec![Span::styled(
+            "Loading connections...",
+            Style::default().fg(Color::Yellow),
+        )]))]
     };
 
     let title = if search_query.is_empty() {
         format!("Connections (offset: {})", scroll_offset)
     } else {
-        format!("Connections (filtered: '{}', offset: {})", search_query, scroll_offset)
+        format!(
+            "Connections (filtered: '{}', offset: {})",
+            search_query, scroll_offset
+        )
     };
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(title));
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
 
     f.render_widget(list, area);
 }
 
 fn render_connection_item(connection: &Connection, is_selected: bool) -> ListItem {
     let style = if is_selected {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default()
     };

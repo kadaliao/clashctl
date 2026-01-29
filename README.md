@@ -7,7 +7,7 @@ Simple TUI controller for Clash via the External Controller API.
 - Batch speed test with async UI (no freeze; hidden in Work preset)
 - Simple/Expert modes with quick navigation
 - Subscription update (proxy-providers, Mihomo Party)
-- View connections and logs (logs are simulated; real-time requires WebSocket)
+- View connections and logs
 
 ## Requirements
 - Rust (for building)

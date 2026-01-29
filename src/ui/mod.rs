@@ -18,10 +18,11 @@ use ratatui::{
 };
 use std::io;
 use std::path::{Path, PathBuf};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
 
 use crate::app::{AppState, Page};
-use crate::clash::{ClashClient, ConnectionsResponse};
+use crate::clash::{ClashClient, ConnectionsResponse, LogEntry};
 use crate::config::{mihomo_party, AppConfig, Preset};
 use crate::ui::pages::update::{SubscriptionItem, SubscriptionSource};
 use crate::ui::theme::Theme;
@@ -49,6 +50,41 @@ fn format_timestamp_ms(timestamp_ms: i64) -> Option<String> {
         .timestamp_millis_opt(timestamp_ms)
         .single()
         .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+}
+
+fn stop_logs_stream(
+    logs_shutdown: &mut Option<watch::Sender<bool>>,
+    logs_task: &mut Option<JoinHandle<()>>,
+) {
+    if let Some(tx) = logs_shutdown.take() {
+        let _ = tx.send(true);
+    }
+    if let Some(handle) = logs_task.take() {
+        handle.abort();
+    }
+}
+
+fn start_logs_stream(
+    client: ClashClient,
+    logs_tx: mpsc::UnboundedSender<LogEntry>,
+    logs_shutdown: &mut Option<watch::Sender<bool>>,
+    logs_task: &mut Option<JoinHandle<()>>,
+) {
+    stop_logs_stream(logs_shutdown, logs_task);
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    *logs_shutdown = Some(shutdown_tx);
+    *logs_task = Some(tokio::spawn(async move {
+        if let Err(err) = client
+            .stream_logs(Some("info"), shutdown_rx, logs_tx.clone())
+            .await
+        {
+            let _ = logs_tx.send(LogEntry {
+                timestamp: Local::now().format("%H:%M:%S").to_string(),
+                level: "ERROR".to_string(),
+                message: format!("Log stream error: {}", err),
+            });
+        }
+    }));
 }
 
 #[derive(Debug, Clone)]
@@ -294,6 +330,9 @@ async fn run_app<B: ratatui::backend::Backend>(
     let mut logs_search_query = String::new(); // Logs search query
     let mut logs_search_mode = false; // Logs search mode
     let mut logs_scroll_offset = 0; // Logs scroll offset
+    let (logs_tx, mut logs_rx) = mpsc::unbounded_channel::<crate::clash::LogEntry>();
+    let mut logs_task: Option<JoinHandle<()>> = None;
+    let mut logs_shutdown: Option<watch::Sender<bool>> = None;
     let mut performance_last_refresh = std::time::Instant::now();
     let mut performance_upload_total = 0u64;
     let mut performance_download_total = 0u64;
@@ -313,6 +352,13 @@ async fn run_app<B: ratatui::backend::Backend>(
     loop {
         // Process any pending delay test results
         state.process_delay_results();
+
+        while let Ok(entry) = logs_rx.try_recv() {
+            logs_data.insert(0, entry);
+            if logs_data.len() > 1000 {
+                logs_data.truncate(1000);
+            }
+        }
 
         while let Ok(event) = update_rx.try_recv() {
             match event {
@@ -626,14 +672,15 @@ async fn run_app<B: ratatui::backend::Backend>(
                         KeyCode::Char('o') => {
                             state.current_page = Page::Logs;
                             logs_scroll_offset = 0;
-                            // Fetch logs immediately
-                            match state.clash_state.client.get_logs().await {
-                                Ok(data) => logs_data = data,
-                                Err(e) => {
-                                    state.status_message =
-                                        Some(format!("Failed to fetch logs: {}", e))
-                                }
-                            }
+                            logs_search_mode = false;
+                            logs_search_query.clear();
+                            logs_data.clear();
+                            start_logs_stream(
+                                state.clash_state.client.clone(),
+                                logs_tx.clone(),
+                                &mut logs_shutdown,
+                                &mut logs_task,
+                            );
                         }
                         _ => {}
                     },
@@ -1392,23 +1439,24 @@ async fn run_app<B: ratatui::backend::Backend>(
                             // Normal mode
                             match key.code {
                                 KeyCode::Char('q') | KeyCode::Esc => {
+                                    stop_logs_stream(&mut logs_shutdown, &mut logs_task);
                                     state.current_page = Page::Home;
                                 }
-                                KeyCode::Char('h') => state.current_page = Page::Home,
+                                KeyCode::Char('h') => {
+                                    stop_logs_stream(&mut logs_shutdown, &mut logs_task);
+                                    state.current_page = Page::Home;
+                                }
                                 KeyCode::Char('r') => {
                                     // Refresh logs
-                                    state.status_message = Some("Refreshing logs...".to_string());
-                                    match state.clash_state.client.get_logs().await {
-                                        Ok(data) => {
-                                            logs_data = data;
-                                            state.status_message =
-                                                Some("Logs refreshed!".to_string());
-                                        }
-                                        Err(e) => {
-                                            state.status_message =
-                                                Some(format!("Failed to refresh: {}", e));
-                                        }
-                                    }
+                                    state.status_message = Some("Reconnecting logs...".to_string());
+                                    logs_data.clear();
+                                    logs_scroll_offset = 0;
+                                    start_logs_stream(
+                                        state.clash_state.client.clone(),
+                                        logs_tx.clone(),
+                                        &mut logs_shutdown,
+                                        &mut logs_task,
+                                    );
                                 }
                                 KeyCode::Char('f') | KeyCode::Char('F') => {
                                     // Change filter level

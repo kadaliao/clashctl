@@ -1,6 +1,11 @@
 use anyhow::{Context, Result};
+use futures_util::{SinkExt, StreamExt};
 use reqwest::Client as HttpClient;
 use serde::de::DeserializeOwned;
+use tokio::sync::{mpsc, watch};
+use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+use tokio_tungstenite::connect_async;
+use url::Url;
 
 use super::types::*;
 
@@ -225,110 +230,116 @@ impl ClashClient {
         Ok(())
     }
 
-    /// Get logs (simulated - Clash doesn't provide HTTP API for logs)
-    /// In production, you would implement WebSocket connection
-    pub async fn get_logs(&self) -> Result<Vec<super::types::LogEntry>> {
-        // Since Clash logs are typically via WebSocket which is complex,
-        // we'll return sample logs for now. In production, implement WebSocket.
+    /// Stream logs via WebSocket and push entries into sender until shutdown.
+    pub async fn stream_logs(
+        &self,
+        level: Option<&str>,
+        mut shutdown: watch::Receiver<bool>,
+        sender: mpsc::UnboundedSender<super::types::LogEntry>,
+    ) -> Result<()> {
+        let url = self.logs_ws_url(level)?;
+        let mut request = url.into_client_request()?;
+        if let Some(auth) = self.auth_header() {
+            request
+                .headers_mut()
+                .insert("Authorization", auth.parse()?);
+        }
 
-        // Get current time
-        let now = chrono::Local::now();
+        let (ws_stream, _) = connect_async(request)
+            .await
+            .context("Failed to connect to logs WebSocket")?;
+        let (mut write, mut read) = ws_stream.split();
 
-        // Generate realistic sample logs
-        let mut logs = vec![];
-
-        // Add some realistic log entries spanning the last few minutes
-        for i in (0..20).rev() {
-            let time = now - chrono::Duration::seconds(i * 15);
-            let timestamp = time.format("%H:%M:%S").to_string();
-
-            match i % 7 {
-                0 => logs.push(super::types::LogEntry {
-                    timestamp: timestamp.clone(),
-                    level: "INFO".to_string(),
-                    message: format!("[TCP] 192.168.1.{} --> youtube.com:443", 100 + (i % 50)),
-                }),
-                1 => logs.push(super::types::LogEntry {
-                    timestamp: timestamp.clone(),
-                    level: "INFO".to_string(),
-                    message: format!("[UDP] 192.168.1.{} --> 8.8.8.8:53", 100 + (i % 50)),
-                }),
-                2 => logs.push(super::types::LogEntry {
-                    timestamp: timestamp.clone(),
-                    level: "INFO".to_string(),
-                    message: format!(
-                        "[TCP] Connection established: api.github.com:443 via {}",
-                        if i % 2 == 0 { "Proxy" } else { "Direct" }
-                    ),
-                }),
-                3 => logs.push(super::types::LogEntry {
-                    timestamp: timestamp.clone(),
-                    level: "WARNING".to_string(),
-                    message: "DNS query timeout for example.com, retrying...".to_string(),
-                }),
-                4 => logs.push(super::types::LogEntry {
-                    timestamp: timestamp.clone(),
-                    level: "INFO".to_string(),
-                    message: format!(
-                        "[TCP] 192.168.1.{} --> cdn.jsdelivr.net:443",
-                        100 + (i % 50)
-                    ),
-                }),
-                5 => logs.push(super::types::LogEntry {
-                    timestamp: timestamp.clone(),
-                    level: "INFO".to_string(),
-                    message: "Rule matched: DOMAIN-SUFFIX,google.com -> Proxy".to_string(),
-                }),
-                _ => logs.push(super::types::LogEntry {
-                    timestamp: timestamp.clone(),
-                    level: "INFO".to_string(),
-                    message: format!("[TCP] Connection closed: transfer {} bytes", 1024 * (i + 1)),
-                }),
+        loop {
+            tokio::select! {
+                _ = shutdown.changed() => {
+                    let _ = write.send(Message::Close(None)).await;
+                    break;
+                }
+                msg = read.next() => {
+                    match msg {
+                        Some(Ok(Message::Text(text))) => {
+                            if let Some(entry) = parse_ws_log(&text) {
+                                let _ = sender.send(entry);
+                            }
+                        }
+                        Some(Ok(Message::Binary(bin))) => {
+                            if let Ok(text) = String::from_utf8(bin) {
+                                if let Some(entry) = parse_ws_log(&text) {
+                                    let _ = sender.send(entry);
+                                }
+                            }
+                        }
+                        Some(Ok(Message::Ping(payload))) => {
+                            let _ = write.send(Message::Pong(payload)).await;
+                        }
+                        Some(Ok(Message::Close(_))) => break,
+                        Some(Ok(_)) => {}
+                        Some(Err(err)) => return Err(err.into()),
+                        None => break,
+                    }
+                }
             }
         }
 
-        // Add a few warnings and one error
-        logs.push(super::types::LogEntry {
-            timestamp: now.format("%H:%M:%S").to_string(),
-            level: "WARNING".to_string(),
-            message: "Proxy health check failed for node: HK-Server-01 (timeout)".to_string(),
-        });
-
-        logs.push(super::types::LogEntry {
-            timestamp: (now - chrono::Duration::seconds(5))
-                .format("%H:%M:%S")
-                .to_string(),
-            level: "ERROR".to_string(),
-            message: "Failed to connect to proxy server: connection refused".to_string(),
-        });
-
-        logs.push(super::types::LogEntry {
-            timestamp: (now - chrono::Duration::seconds(10))
-                .format("%H:%M:%S")
-                .to_string(),
-            level: "INFO".to_string(),
-            message: "Provider updated: subscription-1 (128 nodes loaded)".to_string(),
-        });
-
-        logs.push(super::types::LogEntry {
-            timestamp: (now - chrono::Duration::seconds(2))
-                .format("%H:%M:%S")
-                .to_string(),
-            level: "WARNING".to_string(),
-            message: "High memory usage detected: 512MB / 1GB".to_string(),
-        });
-
-        logs.push(super::types::LogEntry {
-            timestamp: now.format("%H:%M:%S").to_string(),
-            level: "INFO".to_string(),
-            message:
-                "Note: Real-time logs require WebSocket implementation. These are simulated logs."
-                    .to_string(),
-        });
-
-        // Reverse to show newest first
-        logs.reverse();
-
-        Ok(logs)
+        Ok(())
     }
+
+    fn logs_ws_url(&self, level: Option<&str>) -> Result<Url> {
+        let mut url = Url::parse(&self.base_url)
+            .context("Invalid base URL for logs WebSocket")?;
+
+        match url.scheme() {
+            "https" => url.set_scheme("wss").map_err(|_| anyhow::anyhow!("Invalid scheme"))?,
+            "http" => url.set_scheme("ws").map_err(|_| anyhow::anyhow!("Invalid scheme"))?,
+            "wss" | "ws" => {}
+            _ => anyhow::bail!("Unsupported URL scheme: {}", url.scheme()),
+        }
+
+        url.set_path("/logs");
+        if let Some(level) = level {
+            url.set_query(Some(&format!("level={}", level)));
+        }
+        Ok(url)
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct WsLogSimple {
+    #[serde(rename = "type")]
+    level: String,
+    payload: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct WsLogNested {
+    #[serde(rename = "type")]
+    kind: String,
+    payload: WsLogSimple,
+}
+
+fn parse_ws_log(text: &str) -> Option<super::types::LogEntry> {
+    let (level, message) = if let Ok(nested) = serde_json::from_str::<WsLogNested>(text) {
+        if nested.kind.to_lowercase() == "log" {
+            (nested.payload.level, nested.payload.payload)
+        } else {
+            return None;
+        }
+    } else if let Ok(simple) = serde_json::from_str::<WsLogSimple>(text) {
+        (simple.level, simple.payload)
+    } else {
+        let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+        return Some(super::types::LogEntry {
+            timestamp,
+            level: "INFO".to_string(),
+            message: text.to_string(),
+        });
+    };
+
+    let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+    Some(super::types::LogEntry {
+        timestamp,
+        level: level.to_uppercase(),
+        message,
+    })
 }

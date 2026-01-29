@@ -19,3 +19,6 @@ anyhow = "1"
 thiserror = "1"
 dirs = "5"
 chrono = "0.4"
+futures-util = "0.3"
+tokio-tungstenite = { version = "0.23", features = ["rustls-tls-native-roots"] }
+url = "2"

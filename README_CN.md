@@ -7,7 +7,7 @@
 - 批量测速，异步 UI 不阻塞（Work 预设会隐藏）
 - Simple/Expert 双模式快速切换
 - 订阅更新（proxy-providers、Mihomo Party）
-- 查看连接与日志（日志为模拟数据，实时需 WebSocket）
+- 查看连接与日志
 
 ## 依赖
 - Rust（用于编译）

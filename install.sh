@@ -32,12 +32,31 @@ else
   API_URL="https://api.github.com/repos/${REPO}/releases/tags/v${VERSION}"
 fi
 
+RESPONSE="$(
+  curl -sSL \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    -w '\n%{http_code}' \
+    "${API_URL}"
+)"
+BODY="${RESPONSE%$'\n'*}"
+STATUS="${RESPONSE##*$'\n'}"
+if [[ "${STATUS}" != "200" ]]; then
+  echo "Failed to fetch release metadata from GitHub (HTTP ${STATUS})." >&2
+  echo "If you haven't published a release yet, create one and retry." >&2
+  if [[ -n "${BODY}" ]]; then
+    echo "${BODY}" >&2
+  fi
+  exit 1
+fi
+
 ASSET_URL="$(
-  curl -fsSL "${API_URL}" | python3 - "${ARCH}" <<'PY'
+  printf '%s' "${BODY}" | ARCH="${ARCH}" python3 -c '
 import json
+import os
 import sys
 
-arch = sys.argv[1]
+arch = os.environ["ARCH"]
 data = json.load(sys.stdin)
 tag = data.get("tag_name", "")
 version = tag[1:] if tag.startswith("v") else tag
@@ -49,7 +68,7 @@ for asset in data.get("assets", []):
 
 sys.stderr.write(f"Release asset not found: {name}\n")
 sys.exit(1)
-PY
+'
 )"
 
 TMP_DIR="$(mktemp -d)"

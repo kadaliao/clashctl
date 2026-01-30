@@ -27,7 +27,7 @@ cargo build --release
 ## Install (macOS)
 ### One-line install
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/master/install.sh | bash -s -- <owner>/<repo>
+curl -fsSL https://raw.githubusercontent.com/kadaliao/clashctl/master/install.sh | sh
 ```
 
 ### Manual install

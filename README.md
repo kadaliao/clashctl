@@ -25,6 +25,12 @@ cargo build --release
 ```
 
 ## Install (macOS)
+### One-line install
+```bash
+curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/master/install.sh | bash -s -- <owner>/<repo>
+```
+
+### Manual install
 1. Download the matching release asset from GitHub Releases.
    - `arm64` for Apple Silicon
    - `x86_64` for Intel

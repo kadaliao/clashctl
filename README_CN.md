@@ -25,6 +25,12 @@ cargo build --release
 ```
 
 ## 安装（macOS）
+### 一键安装
+```bash
+curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/master/install.sh | bash -s -- <owner>/<repo>
+```
+
+### 手动安装
 1. 从 GitHub Releases 下载对应的版本。
    - Apple Silicon 选 `arm64`
    - Intel 选 `x86_64`

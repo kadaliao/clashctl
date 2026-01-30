@@ -87,9 +87,8 @@ async fn test_api_connection(api_url: &str, secret: &Option<String>) -> Result<(
                 "  Mode: {}",
                 config
                     .mode
-                    .as_ref()
-                    .map(|mode| format!("{:?}", mode))
-                    .unwrap_or_else(|| "Unknown".to_string())
+                    .as_deref()
+                    .unwrap_or("Unknown")
             );
             println!("  HTTP Port: {}", config.port);
             println!("  SOCKS Port: {}", config.socks_port);

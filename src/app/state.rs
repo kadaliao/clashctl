@@ -246,8 +246,10 @@ impl ClashState {
         // Get config
         match self.client.get_config().await {
             Ok(config) => {
-                if let Some(mode) = config.mode {
-                    self.mode = mode;
+                if let Some(raw_mode) = config.mode.as_deref() {
+                    if let Some(mode) = ClashMode::from_str(raw_mode) {
+                        self.mode = mode;
+                    }
                 }
             }
             Err(e) => {

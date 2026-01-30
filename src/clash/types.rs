@@ -21,6 +21,15 @@ impl ClashMode {
         }
     }
 
+    pub fn from_str(raw: &str) -> Option<Self> {
+        match raw.to_lowercase().as_str() {
+            "rule" => Some(ClashMode::Rule),
+            "global" => Some(ClashMode::Global),
+            "direct" => Some(ClashMode::Direct),
+            _ => None,
+        }
+    }
+
     pub fn next(&self) -> Self {
         match self {
             ClashMode::Rule => ClashMode::Global,
@@ -42,7 +51,7 @@ pub struct ConfigResponse {
     #[serde(rename = "allow-lan", default)]
     pub allow_lan: bool,
     #[serde(default)]
-    pub mode: Option<ClashMode>,
+    pub mode: Option<String>,
     #[serde(rename = "log-level", default)]
     pub log_level: String,
 }

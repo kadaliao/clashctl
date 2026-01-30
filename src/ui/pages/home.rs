@@ -104,6 +104,17 @@ fn render_status(f: &mut Frame, area: Rect, state: &AppState) {
         }
     }
 
+    let age_secs = clash.last_update.elapsed().as_secs();
+    let age_text = if age_secs < 60 {
+        format!("Updated: {}s ago", age_secs)
+    } else {
+        format!("Updated: {}m ago", age_secs / 60)
+    };
+    lines.push(Line::from(Span::styled(
+        age_text,
+        Style::default().fg(Color::DarkGray),
+    )));
+
     // Error display with helpful hints
     if let Some(err) = &clash.error {
         lines.push(Line::from(""));

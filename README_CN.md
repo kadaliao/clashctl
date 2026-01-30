@@ -12,6 +12,7 @@
 ## 依赖
 - Rust（用于编译）
 - 运行中的 Clash 内核，并开启 External Controller
+- 预编译版本仅提供 macOS（Apple Silicon / Intel）
 
 ## 快速开始
 
@@ -21,6 +22,18 @@ cargo build --release
 
 # 或直接运行
 ./target/release/clashctl --api-url http://127.0.0.1:9090 --secret your_secret
+```
+
+## 安装（macOS）
+1. 从 GitHub Releases 下载对应的版本。
+   - Apple Silicon 选 `arm64`
+   - Intel 选 `x86_64`
+2. 解压并把二进制放到 PATH。
+
+```bash
+tar -xzf clashctl-<版本>-macos-<架构>.tar.gz
+chmod +x clashctl
+sudo mv clashctl /usr/local/bin/
 ```
 
 ## 常用快捷键

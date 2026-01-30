@@ -12,6 +12,7 @@ Simple TUI controller for Clash via the External Controller API.
 ## Requirements
 - Rust (for building)
 - A running Clash-compatible core with External Controller enabled
+- Prebuilt releases are provided for macOS (Apple Silicon / Intel)
 
 ## Quick start
 
@@ -21,6 +22,18 @@ cargo build --release
 
 # or run directly
 ./target/release/clashctl --api-url http://127.0.0.1:9090 --secret your_secret
+```
+
+## Install (macOS)
+1. Download the matching release asset from GitHub Releases.
+   - `arm64` for Apple Silicon
+   - `x86_64` for Intel
+2. Unpack and move the binary into your PATH.
+
+```bash
+tar -xzf clashctl-<version>-macos-<arch>.tar.gz
+chmod +x clashctl
+sudo mv clashctl /usr/local/bin/
 ```
 
 ## Basic keys

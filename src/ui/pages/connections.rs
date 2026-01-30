@@ -235,7 +235,7 @@ fn render_connections(
     f.render_widget(list, area);
 }
 
-fn render_connection_item(connection: &Connection, is_selected: bool) -> ListItem {
+fn render_connection_item(connection: &Connection, is_selected: bool) -> ListItem<'_> {
     let style = if is_selected {
         Style::default()
             .fg(Color::Yellow)

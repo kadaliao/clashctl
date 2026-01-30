@@ -55,6 +55,8 @@ pub fn render(
     level_filter: LogLevel,
     search_query: &str,
     scroll_offset: usize,
+    stream_connected: bool,
+    stream_status: Option<&str>,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -65,7 +67,14 @@ pub fn render(
         ])
         .split(area);
 
-    render_filter_bar(f, chunks[0], level_filter, search_query);
+    render_filter_bar(
+        f,
+        chunks[0],
+        level_filter,
+        search_query,
+        stream_connected,
+        stream_status,
+    );
     render_logs_list(
         f,
         chunks[1],
@@ -77,17 +86,40 @@ pub fn render(
     render_help(f, chunks[2]);
 }
 
-fn render_filter_bar(f: &mut Frame, area: Rect, level_filter: LogLevel, search_query: &str) {
+fn render_filter_bar(
+    f: &mut Frame,
+    area: Rect,
+    level_filter: LogLevel,
+    search_query: &str,
+    stream_connected: bool,
+    stream_status: Option<&str>,
+) {
+    let status_label = if stream_connected {
+        "Live"
+    } else if matches!(stream_status, Some("connecting") | Some("reconnecting")) {
+        "Connecting"
+    } else {
+        "Disconnected"
+    };
+    let status_text = match stream_status {
+        Some(detail) if !detail.is_empty() && !stream_connected && status_label != "Connecting" => {
+            format!("Status: {} ({})", status_label, detail)
+        }
+        _ => format!("Status: {}", status_label),
+    };
+
     let filter_text = if search_query.is_empty() {
         format!(
-            "Filter: {} | Press 'f' to change filter, '/' to search",
-            level_filter.as_str()
+            "Filter: {} | {} | Press 'f' to change filter, '/' to search",
+            level_filter.as_str(),
+            status_text
         )
     } else {
         format!(
-            "Filter: {} | Search: \"{}\" | Press ESC to clear",
+            "Filter: {} | Search: \"{}\" | {} | Press ESC to clear",
             level_filter.as_str(),
-            search_query
+            search_query,
+            status_text
         )
     };
 
@@ -200,11 +232,11 @@ fn render_help(f: &mut Frame, area: Rect) {
         Span::styled("↑↓", Style::default().fg(Color::Yellow)),
         Span::raw(" Scroll  "),
         Span::styled("f", Style::default().fg(Color::Yellow)),
-        Span::raw(" Change Filter  "),
+        Span::raw(" Change Filter/Stream  "),
         Span::styled("/", Style::default().fg(Color::Yellow)),
         Span::raw(" Search  "),
         Span::styled("r", Style::default().fg(Color::Yellow)),
-        Span::raw(" Refresh  "),
+        Span::raw(" Reconnect  "),
         Span::styled("q/ESC", Style::default().fg(Color::Yellow)),
         Span::raw(" Back"),
     ]))

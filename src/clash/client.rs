@@ -127,6 +127,7 @@ impl ClashClient {
     }
 
     /// Get specific proxy
+    #[allow(dead_code)]
     pub async fn get_proxy(&self, name: &str) -> Result<Proxy> {
         self.get(&format!("/proxies/{}", name)).await
     }
@@ -236,7 +237,7 @@ impl ClashClient {
         &self,
         level: Option<&str>,
         mut shutdown: watch::Receiver<bool>,
-        sender: mpsc::UnboundedSender<super::types::LogEntry>,
+        sender: mpsc::UnboundedSender<super::types::LogStreamEvent>,
     ) -> Result<()> {
         let url = self.logs_ws_url(level)?;
         let mut request = Request::builder().uri(url.as_str()).body(())?;
@@ -249,35 +250,63 @@ impl ClashClient {
         let (ws_stream, _) = connect_async(request)
             .await
             .context("Failed to connect to logs WebSocket")?;
+        let _ = sender.send(super::types::LogStreamEvent::Status(
+            super::types::LogStreamStatus::Connected,
+        ));
         let (mut write, mut read) = ws_stream.split();
 
         loop {
             tokio::select! {
                 _ = shutdown.changed() => {
                     let _ = write.send(Message::Close(None)).await;
+                    let _ = sender.send(super::types::LogStreamEvent::Status(
+                        super::types::LogStreamStatus::Disconnected("stopped".to_string()),
+                    ));
                     break;
                 }
                 msg = read.next() => {
                     match msg {
                         Some(Ok(Message::Text(text))) => {
                             if let Some(entry) = parse_ws_log(&text) {
-                                let _ = sender.send(entry);
+                                let _ = sender.send(super::types::LogStreamEvent::Entry(entry));
                             }
                         }
                         Some(Ok(Message::Binary(bin))) => {
                             if let Ok(text) = String::from_utf8(bin) {
                                 if let Some(entry) = parse_ws_log(&text) {
-                                    let _ = sender.send(entry);
+                                    let _ = sender.send(super::types::LogStreamEvent::Entry(entry));
                                 }
                             }
                         }
                         Some(Ok(Message::Ping(payload))) => {
                             let _ = write.send(Message::Pong(payload)).await;
                         }
-                        Some(Ok(Message::Close(_))) => break,
+                        Some(Ok(Message::Close(_))) => {
+                            let _ = sender.send(super::types::LogStreamEvent::Status(
+                                super::types::LogStreamStatus::Disconnected(
+                                    "connection closed".to_string(),
+                                ),
+                            ));
+                            break;
+                        }
                         Some(Ok(_)) => {}
-                        Some(Err(err)) => return Err(err.into()),
-                        None => break,
+                        Some(Err(err)) => {
+                            let _ = sender.send(super::types::LogStreamEvent::Status(
+                                super::types::LogStreamStatus::Disconnected(format!(
+                                    "error: {}",
+                                    err
+                                )),
+                            ));
+                            return Err(err.into());
+                        }
+                        None => {
+                            let _ = sender.send(super::types::LogStreamEvent::Status(
+                                super::types::LogStreamStatus::Disconnected(
+                                    "connection ended".to_string(),
+                                ),
+                            ));
+                            break;
+                        }
                     }
                 }
             }

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod clash_config;
 pub mod mihomo_party;
 pub mod preset;

@@ -22,7 +22,9 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::app::{AppState, Page};
-use crate::clash::{ClashClient, ConnectionsResponse, LogEntry};
+use crate::clash::{
+    ClashClient, ConnectionsResponse, LogEntry, LogStreamEvent, LogStreamStatus,
+};
 use crate::config::{mihomo_party, AppConfig, Preset};
 use crate::ui::pages::update::{SubscriptionItem, SubscriptionSource};
 use crate::ui::theme::Theme;
@@ -66,25 +68,39 @@ fn stop_logs_stream(
 
 fn start_logs_stream(
     client: ClashClient,
-    logs_tx: mpsc::UnboundedSender<LogEntry>,
+    level: Option<&str>,
+    logs_tx: mpsc::UnboundedSender<LogStreamEvent>,
     logs_shutdown: &mut Option<watch::Sender<bool>>,
     logs_task: &mut Option<JoinHandle<()>>,
 ) {
     stop_logs_stream(logs_shutdown, logs_task);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     *logs_shutdown = Some(shutdown_tx);
+    let level = level.map(|value| value.to_string());
     *logs_task = Some(tokio::spawn(async move {
         if let Err(err) = client
-            .stream_logs(Some("info"), shutdown_rx, logs_tx.clone())
+            .stream_logs(level.as_deref(), shutdown_rx, logs_tx.clone())
             .await
         {
-            let _ = logs_tx.send(LogEntry {
+            let _ = logs_tx.send(LogStreamEvent::Status(
+                LogStreamStatus::Disconnected(format!("error: {}", err)),
+            ));
+            let _ = logs_tx.send(LogStreamEvent::Entry(LogEntry {
                 timestamp: Local::now().format("%H:%M:%S").to_string(),
                 level: "ERROR".to_string(),
                 message: format!("Log stream error: {}", err),
-            });
+            }));
         }
     }));
+}
+
+fn log_level_to_ws(level: pages::LogLevel) -> Option<&'static str> {
+    match level {
+        pages::LogLevel::All => None,
+        pages::LogLevel::Info => Some("info"),
+        pages::LogLevel::Warning => Some("warning"),
+        pages::LogLevel::Error => Some("error"),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -330,9 +346,11 @@ async fn run_app<B: ratatui::backend::Backend>(
     let mut logs_search_query = String::new(); // Logs search query
     let mut logs_search_mode = false; // Logs search mode
     let mut logs_scroll_offset = 0; // Logs scroll offset
-    let (logs_tx, mut logs_rx) = mpsc::unbounded_channel::<crate::clash::LogEntry>();
+    let (logs_tx, mut logs_rx) = mpsc::unbounded_channel::<LogStreamEvent>();
     let mut logs_task: Option<JoinHandle<()>> = None;
     let mut logs_shutdown: Option<watch::Sender<bool>> = None;
+    let mut logs_connected = false;
+    let mut logs_status_detail: Option<String> = None;
     let mut performance_last_refresh = std::time::Instant::now();
     let mut performance_upload_total = 0u64;
     let mut performance_download_total = 0u64;
@@ -353,10 +371,24 @@ async fn run_app<B: ratatui::backend::Backend>(
         // Process any pending delay test results
         state.process_delay_results();
 
-        while let Ok(entry) = logs_rx.try_recv() {
-            logs_data.insert(0, entry);
-            if logs_data.len() > 1000 {
-                logs_data.truncate(1000);
+        while let Ok(event) = logs_rx.try_recv() {
+            match event {
+                LogStreamEvent::Entry(entry) => {
+                    logs_data.insert(0, entry);
+                    if logs_data.len() > 1000 {
+                        logs_data.truncate(1000);
+                    }
+                }
+                LogStreamEvent::Status(status) => match status {
+                    LogStreamStatus::Connected => {
+                        logs_connected = true;
+                        logs_status_detail = None;
+                    }
+                    LogStreamStatus::Disconnected(reason) => {
+                        logs_connected = false;
+                        logs_status_detail = Some(reason);
+                    }
+                },
             }
         }
 
@@ -535,6 +567,8 @@ async fn run_app<B: ratatui::backend::Backend>(
                     logs_level_filter,
                     &logs_search_query,
                     logs_scroll_offset,
+                    logs_connected,
+                    logs_status_detail.as_deref(),
                 ),
                 Page::Performance => pages::render_performance(
                     f,
@@ -675,8 +709,11 @@ async fn run_app<B: ratatui::backend::Backend>(
                             logs_search_mode = false;
                             logs_search_query.clear();
                             logs_data.clear();
+                            logs_connected = false;
+                            logs_status_detail = Some("connecting".to_string());
                             start_logs_stream(
                                 state.clash_state.client.clone(),
+                                log_level_to_ws(logs_level_filter),
                                 logs_tx.clone(),
                                 &mut logs_shutdown,
                                 &mut logs_task,
@@ -1440,10 +1477,14 @@ async fn run_app<B: ratatui::backend::Backend>(
                             match key.code {
                                 KeyCode::Char('q') | KeyCode::Esc => {
                                     stop_logs_stream(&mut logs_shutdown, &mut logs_task);
+                                    logs_connected = false;
+                                    logs_status_detail = None;
                                     state.current_page = Page::Home;
                                 }
                                 KeyCode::Char('h') => {
                                     stop_logs_stream(&mut logs_shutdown, &mut logs_task);
+                                    logs_connected = false;
+                                    logs_status_detail = None;
                                     state.current_page = Page::Home;
                                 }
                                 KeyCode::Char('r') => {
@@ -1451,8 +1492,11 @@ async fn run_app<B: ratatui::backend::Backend>(
                                     state.status_message = Some("Reconnecting logs...".to_string());
                                     logs_data.clear();
                                     logs_scroll_offset = 0;
+                                    logs_connected = false;
+                                    logs_status_detail = Some("reconnecting".to_string());
                                     start_logs_stream(
                                         state.clash_state.client.clone(),
+                                        log_level_to_ws(logs_level_filter),
                                         logs_tx.clone(),
                                         &mut logs_shutdown,
                                         &mut logs_task,
@@ -1464,6 +1508,16 @@ async fn run_app<B: ratatui::backend::Backend>(
                                     logs_scroll_offset = 0;
                                     state.status_message =
                                         Some(format!("Filter: {}", logs_level_filter.as_str()));
+                                    logs_data.clear();
+                                    logs_connected = false;
+                                    logs_status_detail = Some("reconnecting".to_string());
+                                    start_logs_stream(
+                                        state.clash_state.client.clone(),
+                                        log_level_to_ws(logs_level_filter),
+                                        logs_tx.clone(),
+                                        &mut logs_shutdown,
+                                        &mut logs_task,
+                                    );
                                 }
                                 KeyCode::Char('/') => {
                                     // Enter search mode

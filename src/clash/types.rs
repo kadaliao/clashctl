@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -224,4 +226,16 @@ pub struct LogEntry {
     pub timestamp: String,
     pub level: String,
     pub message: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum LogStreamStatus {
+    Connected,
+    Disconnected(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum LogStreamEvent {
+    Entry(LogEntry),
+    Status(LogStreamStatus),
 }

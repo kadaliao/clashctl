@@ -6,6 +6,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct HumanRoute {
     pub name: String,
+    #[allow(dead_code)]
     pub proxy_type: ProxyType,
     pub current_node: Option<String>,
     pub all_nodes: Vec<String>,

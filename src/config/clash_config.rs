@@ -40,6 +40,7 @@ impl ClashConfig {
     }
 
     /// Try to find Clash config in common locations
+    #[allow(dead_code)]
     pub fn find_config() -> Option<PathBuf> {
         Self::find_config_with_hint(None)
     }

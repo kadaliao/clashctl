@@ -18,6 +18,7 @@ pub struct DelayTestResult {
 #[derive(Debug, Clone)]
 pub struct DelayResult {
     pub delay: u32,
+    #[allow(dead_code)]
     pub tested_at: Instant,
 }
 
@@ -184,6 +185,7 @@ impl AppState {
     }
 
     /// Update all providers
+    #[allow(dead_code)]
     pub async fn update_all_providers(&mut self) -> Result<()> {
         self.status_message = Some("Updating all providers...".to_string());
 
@@ -311,7 +313,9 @@ impl ClashState {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HealthStatus {
     Good,
+    #[allow(dead_code)]
     Fair,
+    #[allow(dead_code)]
     Bad,
     Error,
     Unknown,

@@ -62,6 +62,7 @@ impl Preset {
     }
 
     /// Should allow one-click switching (without entering Expert mode)
+    #[allow(dead_code)]
     pub fn allow_quick_switch(&self) -> bool {
         match self {
             Preset::Default => true,
@@ -82,6 +83,7 @@ impl Preset {
     }
 
     /// Should auto-refresh (show changing data frequently)
+    #[allow(dead_code)]
     pub fn auto_refresh(&self) -> bool {
         match self {
             Preset::Default => true,
@@ -92,6 +94,7 @@ impl Preset {
     }
 
     /// All available presets
+    #[allow(dead_code)]
     pub fn all() -> Vec<Preset> {
         vec![
             Preset::Default,

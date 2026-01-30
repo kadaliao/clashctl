@@ -83,7 +83,14 @@ async fn test_api_connection(api_url: &str, secret: &Option<String>) -> Result<(
     match client.get_config().await {
         Ok(config) => {
             println!("✓ Configuration:");
-            println!("  Mode: {:?}", config.mode);
+            println!(
+                "  Mode: {}",
+                config
+                    .mode
+                    .as_ref()
+                    .map(|mode| format!("{:?}", mode))
+                    .unwrap_or_else(|| "Unknown".to_string())
+            );
             println!("  HTTP Port: {}", config.port);
             println!("  SOCKS Port: {}", config.socks_port);
             println!("  Allow LAN: {}", config.allow_lan);

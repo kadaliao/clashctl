@@ -33,15 +33,17 @@ impl ClashMode {
 /// Config response from GET /configs
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConfigResponse {
+    #[serde(default)]
     pub port: u16,
-    #[serde(rename = "socks-port")]
+    #[serde(rename = "socks-port", default)]
     pub socks_port: u16,
-    #[serde(rename = "redir-port")]
+    #[serde(rename = "redir-port", default)]
     pub redir_port: u16,
-    #[serde(rename = "allow-lan")]
+    #[serde(rename = "allow-lan", default)]
     pub allow_lan: bool,
-    pub mode: ClashMode,
-    #[serde(rename = "log-level")]
+    #[serde(default)]
+    pub mode: Option<ClashMode>,
+    #[serde(rename = "log-level", default)]
     pub log_level: String,
 }
 

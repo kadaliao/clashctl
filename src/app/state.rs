@@ -246,7 +246,9 @@ impl ClashState {
         // Get config
         match self.client.get_config().await {
             Ok(config) => {
-                self.mode = config.mode;
+                if let Some(mode) = config.mode {
+                    self.mode = mode;
+                }
             }
             Err(e) => {
                 self.error = Some(format!("Failed to get config: {}", e));

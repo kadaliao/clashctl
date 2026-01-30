@@ -94,37 +94,53 @@ fn render_filter_bar(
     stream_connected: bool,
     stream_status: Option<&str>,
 ) {
+    let is_connecting = matches!(stream_status, Some("connecting") | Some("reconnecting"));
     let status_label = if stream_connected {
         "Live"
-    } else if matches!(stream_status, Some("connecting") | Some("reconnecting")) {
+    } else if is_connecting {
         "Connecting"
     } else {
         "Disconnected"
     };
-    let status_text = match stream_status {
-        Some(detail) if !detail.is_empty() && !stream_connected && status_label != "Connecting" => {
-            format!("Status: {} ({})", status_label, detail)
-        }
-        _ => format!("Status: {}", status_label),
-    };
-
-    let filter_text = if search_query.is_empty() {
-        format!(
-            "Filter: {} | {} | Press 'f' to change filter, '/' to search",
-            level_filter.as_str(),
-            status_text
-        )
+    let status_color = if stream_connected {
+        Color::Green
+    } else if is_connecting {
+        Color::Yellow
     } else {
-        format!(
-            "Filter: {} | Search: \"{}\" | {} | Press ESC to clear",
-            level_filter.as_str(),
-            search_query,
-            status_text
-        )
+        Color::Red
+    };
+    let status_detail = match stream_status {
+        Some(detail) if !detail.is_empty() && !stream_connected && !is_connecting => Some(detail),
+        _ => None,
     };
 
-    let filter = Paragraph::new(filter_text)
-        .style(Style::default().fg(level_filter.color()))
+    let mut spans = Vec::new();
+    spans.push(Span::raw("Filter: "));
+    spans.push(Span::styled(
+        level_filter.as_str(),
+        Style::default().fg(level_filter.color()).add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::raw(" | "));
+    spans.push(Span::styled("● ", Style::default().fg(status_color)));
+    spans.push(Span::styled(
+        status_label,
+        Style::default().fg(status_color).add_modifier(Modifier::BOLD),
+    ));
+    if let Some(detail) = status_detail {
+        spans.push(Span::raw(" ("));
+        spans.push(Span::styled(detail, Style::default().fg(Color::DarkGray)));
+        spans.push(Span::raw(")"));
+    }
+
+    if search_query.is_empty() {
+        spans.push(Span::raw(" | Press 'f' to change filter, '/' to search"));
+    } else {
+        spans.push(Span::raw(" | Search: \""));
+        spans.push(Span::styled(search_query, Style::default().fg(Color::Yellow)));
+        spans.push(Span::raw("\" | Press ESC to clear"));
+    }
+
+    let filter = Paragraph::new(Line::from(spans))
         .alignment(Alignment::Left)
         .block(Block::default().borders(Borders::ALL).title("Logs Filter"));
 

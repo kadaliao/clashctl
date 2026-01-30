@@ -3,7 +3,8 @@ use futures_util::{SinkExt, StreamExt};
 use reqwest::Client as HttpClient;
 use serde::de::DeserializeOwned;
 use tokio::sync::{mpsc, watch};
-use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+use tokio_tungstenite::tungstenite::http::Request;
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::connect_async;
 use url::Url;
 
@@ -238,7 +239,7 @@ impl ClashClient {
         sender: mpsc::UnboundedSender<super::types::LogEntry>,
     ) -> Result<()> {
         let url = self.logs_ws_url(level)?;
-        let mut request = url.into_client_request()?;
+        let mut request = Request::builder().uri(url.as_str()).body(())?;
         if let Some(auth) = self.auth_header() {
             request
                 .headers_mut()

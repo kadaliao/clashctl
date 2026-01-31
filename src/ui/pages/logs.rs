@@ -118,13 +118,17 @@ fn render_filter_bar(
     spans.push(Span::raw("Filter: "));
     spans.push(Span::styled(
         level_filter.as_str(),
-        Style::default().fg(level_filter.color()).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(level_filter.color())
+            .add_modifier(Modifier::BOLD),
     ));
     spans.push(Span::raw(" | "));
     spans.push(Span::styled("● ", Style::default().fg(status_color)));
     spans.push(Span::styled(
         status_label,
-        Style::default().fg(status_color).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(status_color)
+            .add_modifier(Modifier::BOLD),
     ));
     if let Some(detail) = status_detail {
         spans.push(Span::raw(" ("));
@@ -136,7 +140,10 @@ fn render_filter_bar(
         spans.push(Span::raw(" | Press 'f' to change filter, '/' to search"));
     } else {
         spans.push(Span::raw(" | Search: \""));
-        spans.push(Span::styled(search_query, Style::default().fg(Color::Yellow)));
+        spans.push(Span::styled(
+            search_query,
+            Style::default().fg(Color::Yellow),
+        ));
         spans.push(Span::raw("\" | Press ESC to clear"));
     }
 

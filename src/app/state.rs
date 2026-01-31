@@ -74,6 +74,9 @@ impl AppState {
     /// Test delay for a proxy (non-blocking)
     /// Starts background test, result will arrive via channel
     pub fn start_test_delay(&mut self, proxy: String) {
+        if !self.is_node_testable(&proxy) {
+            return;
+        }
         // Mark as testing
         if !self.testing_nodes.contains(&proxy) {
             self.testing_nodes.push(proxy.clone());
@@ -106,6 +109,11 @@ impl AppState {
             // Remove from testing list
             self.testing_nodes.retain(|n| n != &result.node);
 
+            if !self.is_node_testable(&result.node) {
+                self.delay_cache.remove(&result.node);
+                continue;
+            }
+
             // Update cache if test succeeded
             if let Some(delay) = result.delay {
                 self.delay_cache.insert(
@@ -133,11 +141,17 @@ impl AppState {
 
     /// Check if a node is currently being tested
     pub fn is_testing(&self, node: &str) -> bool {
+        if !self.is_node_testable(node) {
+            return false;
+        }
         self.testing_nodes.contains(&node.to_string())
     }
 
     /// Get cached delay result for a node
     pub fn get_delay(&self, node: &str) -> Option<&DelayResult> {
+        if !self.is_node_testable(node) {
+            return None;
+        }
         self.delay_cache.get(node)
     }
 
@@ -155,6 +169,9 @@ impl AppState {
 
     /// Check if a node is testable (not Direct/Reject type)
     pub fn is_node_testable(&self, node_name: &str) -> bool {
+        if node_name.eq_ignore_ascii_case("DIRECT") {
+            return false;
+        }
         if let Some(proxy) = self.clash_state.proxies.get(node_name) {
             !matches!(
                 proxy.proxy_type,

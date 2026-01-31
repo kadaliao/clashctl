@@ -3,9 +3,9 @@ use futures_util::{SinkExt, StreamExt};
 use reqwest::Client as HttpClient;
 use serde::de::DeserializeOwned;
 use tokio::sync::{mpsc, watch};
+use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::http::Request;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::connect_async;
 use url::Url;
 
 use super::types::*;
@@ -116,6 +116,28 @@ impl ClashClient {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             anyhow::bail!("Failed to update config: {} - {}", status, body);
+        }
+
+        Ok(())
+    }
+
+    /// Reload Clash configuration from a file path
+    pub async fn reload_config_path(&self, path: &str) -> Result<()> {
+        let url = format!("{}/configs", self.base_url);
+        let mut req = self.client.put(&url).json(&serde_json::json!({
+            "path": path
+        }));
+
+        if let Some(secret) = &self.secret {
+            req = req.bearer_auth(secret);
+        }
+
+        let response = req.send().await.context("Failed to connect to Clash API")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("Failed to reload config: {} - {}", status, body);
         }
 
         Ok(())
@@ -242,9 +264,7 @@ impl ClashClient {
         let url = self.logs_ws_url(level)?;
         let mut request = Request::builder().uri(url.as_str()).body(())?;
         if let Some(auth) = self.auth_header() {
-            request
-                .headers_mut()
-                .insert("Authorization", auth.parse()?);
+            request.headers_mut().insert("Authorization", auth.parse()?);
         }
 
         let (ws_stream, _) = connect_async(request)
@@ -316,12 +336,15 @@ impl ClashClient {
     }
 
     fn logs_ws_url(&self, level: Option<&str>) -> Result<Url> {
-        let mut url = Url::parse(&self.base_url)
-            .context("Invalid base URL for logs WebSocket")?;
+        let mut url = Url::parse(&self.base_url).context("Invalid base URL for logs WebSocket")?;
 
         match url.scheme() {
-            "https" => url.set_scheme("wss").map_err(|_| anyhow::anyhow!("Invalid scheme"))?,
-            "http" => url.set_scheme("ws").map_err(|_| anyhow::anyhow!("Invalid scheme"))?,
+            "https" => url
+                .set_scheme("wss")
+                .map_err(|_| anyhow::anyhow!("Invalid scheme"))?,
+            "http" => url
+                .set_scheme("ws")
+                .map_err(|_| anyhow::anyhow!("Invalid scheme"))?,
             "wss" | "ws" => {}
             _ => anyhow::bail!("Unsupported URL scheme: {}", url.scheme()),
         }

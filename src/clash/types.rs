@@ -48,6 +48,8 @@ pub struct ConfigResponse {
     pub socks_port: u16,
     #[serde(rename = "redir-port", default)]
     pub redir_port: u16,
+    #[serde(default)]
+    pub path: Option<String>,
     #[serde(rename = "allow-lan", default)]
     pub allow_lan: bool,
     #[serde(default)]

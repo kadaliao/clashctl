@@ -2,6 +2,7 @@ pub mod pages;
 pub mod theme;
 
 use anyhow::Result;
+use base64::Engine;
 use chrono::{Local, TimeZone, Utc};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
@@ -16,15 +17,16 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Terminal,
 };
+use std::fs::OpenOptions;
 use std::io;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
+use url::Url;
 
 use crate::app::{AppState, Page};
-use crate::clash::{
-    ClashClient, ConnectionsResponse, LogEntry, LogStreamEvent, LogStreamStatus,
-};
+use crate::clash::{ClashClient, ConnectionsResponse, LogEntry, LogStreamEvent, LogStreamStatus};
 use crate::config::{mihomo_party, AppConfig, Preset};
 use crate::ui::pages::update::{SubscriptionItem, SubscriptionSource};
 use crate::ui::theme::Theme;
@@ -45,6 +47,38 @@ fn resolve_clash_config_path(config: &mut AppConfig) -> Option<PathBuf> {
     }
 
     found
+}
+
+fn debug_log_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("CLASHCTL_DEBUG_LOG") {
+        if !path.trim().is_empty() {
+            return Some(PathBuf::from(path));
+        }
+    }
+    if let Ok(enabled) = std::env::var("CLASHCTL_DEBUG") {
+        let enabled = enabled.to_ascii_lowercase();
+        if enabled == "1" || enabled == "true" || enabled == "yes" {
+            return Some(PathBuf::from("/tmp/clashctl-debug.log"));
+        }
+    }
+    None
+}
+
+fn debug_log(message: &str) {
+    let path = match debug_log_path() {
+        Some(path) => path,
+        None => return,
+    };
+    let mut file = match OpenOptions::new().create(true).append(true).open(path) {
+        Ok(file) => file,
+        Err(_) => return,
+    };
+    let _ = writeln!(
+        file,
+        "[{}] {}",
+        Local::now().format("%Y-%m-%d %H:%M:%S"),
+        message
+    );
 }
 
 fn format_timestamp_ms(timestamp_ms: i64) -> Option<String> {
@@ -82,9 +116,9 @@ fn start_logs_stream(
             .stream_logs(level.as_deref(), shutdown_rx, logs_tx.clone())
             .await
         {
-            let _ = logs_tx.send(LogStreamEvent::Status(
-                LogStreamStatus::Disconnected(format!("error: {}", err)),
-            ));
+            let _ = logs_tx.send(LogStreamEvent::Status(LogStreamStatus::Disconnected(
+                format!("error: {}", err),
+            )));
             let _ = logs_tx.send(LogStreamEvent::Entry(LogEntry {
                 timestamp: Local::now().format("%H:%M:%S").to_string(),
                 level: "ERROR".to_string(),
@@ -122,6 +156,7 @@ fn load_mihomo_party_subscriptions(config: &AppConfig) -> Result<Vec<Subscriptio
     };
 
     let list = mihomo_party::MihomoPartyProfileList::load(&list_path)?;
+    let current_id = list.current.clone();
     let mut items = Vec::new();
 
     for item in list.items {
@@ -134,7 +169,20 @@ fn load_mihomo_party_subscriptions(config: &AppConfig) -> Result<Vec<Subscriptio
             None => continue,
         };
 
-        let proxy_count = mihomo_party::count_proxies_in_profile(&profile_path).unwrap_or(0);
+        let proxy_count = mihomo_party::count_proxies_in_profile(&profile_path)
+            .or_else(|| {
+                std::fs::read(&profile_path)
+                    .ok()
+                    .map(|bytes| parse_raw_subscription(&bytes).len())
+            })
+            .unwrap_or(0);
+        if proxy_count == 0 {
+            debug_log(&format!(
+                "subscription '{}' proxy_count=0 path={}",
+                item.name,
+                profile_path.display()
+            ));
+        }
         let updated_at = item.updated.and_then(format_timestamp_ms);
 
         items.push(SubscriptionItem {
@@ -143,6 +191,7 @@ fn load_mihomo_party_subscriptions(config: &AppConfig) -> Result<Vec<Subscriptio
             url: item.url,
             proxy_count,
             updated_at,
+            is_current: current_id.as_deref() == Some(item.id.as_str()),
             source: SubscriptionSource::MihomoPartyProfile {
                 id: item.id,
                 profile_path,
@@ -196,6 +245,7 @@ async fn refresh_update_providers(
                     url,
                     proxy_count,
                     updated_at,
+                    is_current: false,
                     source: SubscriptionSource::ClashProvider { name },
                 });
             }
@@ -217,12 +267,40 @@ async fn update_mihomo_party_profile(
 ) -> Result<i64> {
     let response = reqwest::get(url).await?.error_for_status()?;
     let bytes = response.bytes().await?;
+    debug_log(&format!(
+        "update_profile id={} url_len={} bytes_len={}",
+        id,
+        url.len(),
+        bytes.len()
+    ));
 
     if let Some(parent) = profile_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
-    std::fs::write(profile_path, &bytes)?;
+    let final_bytes = if looks_like_clash_config(&bytes) {
+        debug_log("update_profile detected full config");
+        bytes.to_vec()
+    } else {
+        debug_log("update_profile raw subscription, attempt convert");
+        let work_config_path = mihomo_party::work_config_path_from_list(list_path);
+        if let Some(work_config_path) = work_config_path {
+            match convert_raw_subscription_to_config(&bytes, &work_config_path) {
+                Ok((output, count)) => {
+                    debug_log(&format!(
+                        "update_profile converted raw -> config, proxies={}",
+                        count
+                    ));
+                    output
+                }
+                Err(_) => bytes.to_vec(),
+            }
+        } else {
+            bytes.to_vec()
+        }
+    };
+
+    std::fs::write(profile_path, &final_bytes)?;
 
     let updated_at = Utc::now().timestamp_millis();
     mihomo_party::update_profile_updated_at(list_path, id, updated_at)?;
@@ -279,6 +357,851 @@ fn spawn_update_task(
             error,
         });
     });
+}
+
+fn is_http_url(raw: &str) -> bool {
+    raw.starts_with("http://") || raw.starts_with("https://")
+}
+
+fn mapping_has_key(map: &serde_yaml::Mapping, key: &str) -> bool {
+    map.contains_key(&serde_yaml::Value::String(key.to_string()))
+}
+
+fn looks_like_clash_config(bytes: &[u8]) -> bool {
+    let value: serde_yaml::Value = match serde_yaml::from_slice(bytes) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    let map = match value.as_mapping() {
+        Some(map) => map,
+        None => return false,
+    };
+
+    mapping_has_key(map, "proxies")
+        || mapping_has_key(map, "proxy-providers")
+        || mapping_has_key(map, "proxy-groups")
+        || mapping_has_key(map, "rules")
+        || mapping_has_key(map, "rule-providers")
+}
+
+fn percent_decode(input: &str) -> String {
+    let mut out: Vec<u8> = Vec::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = bytes[i + 1];
+            let lo = bytes[i + 2];
+            let hex = |b: u8| -> Option<u8> {
+                match b {
+                    b'0'..=b'9' => Some(b - b'0'),
+                    b'a'..=b'f' => Some(b - b'a' + 10),
+                    b'A'..=b'F' => Some(b - b'A' + 10),
+                    _ => None,
+                }
+            };
+            if let (Some(h), Some(l)) = (hex(hi), hex(lo)) {
+                out.push((h << 4) | l);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+fn decode_base64(input: &str) -> Option<Vec<u8>> {
+    let mut normalized: String = input.chars().filter(|c| !c.is_whitespace()).collect();
+    normalized = normalized.replace('-', "+").replace('_', "/");
+    while normalized.len() % 4 != 0 {
+        normalized.push('=');
+    }
+    base64::engine::general_purpose::STANDARD
+        .decode(normalized.as_bytes())
+        .ok()
+}
+
+fn extract_subscription_lines(bytes: &[u8]) -> Vec<String> {
+    let raw = String::from_utf8_lossy(bytes).trim().to_string();
+    let mut candidates = vec![raw.clone()];
+    if !raw.contains("://") {
+        if let Some(decoded) = decode_base64(&raw) {
+            if let Ok(decoded) = String::from_utf8(decoded) {
+                candidates.push(decoded);
+            }
+        }
+    }
+
+    let text = candidates
+        .into_iter()
+        .find(|candidate| candidate.contains("://"))
+        .unwrap_or(raw);
+
+    text.lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+#[derive(Clone)]
+struct ProxySpec {
+    name: String,
+    map: serde_yaml::Mapping,
+}
+
+fn parse_ss_url(line: &str) -> Option<ProxySpec> {
+    let line = line.trim();
+    if !line.starts_with("ss://") {
+        return None;
+    }
+    let mut content = &line[5..];
+    let mut name = None;
+    if let Some(hash_idx) = content.find('#') {
+        let (left, right) = content.split_at(hash_idx);
+        content = left;
+        name = Some(percent_decode(&right[1..]));
+    }
+
+    let mut plugin = None;
+    let mut plugin_opts = None;
+    if let Some(q_idx) = content.find('?') {
+        let (left, right) = content.split_at(q_idx);
+        content = left;
+        let query = &right[1..];
+        for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+            if key == "plugin" {
+                let value = value.to_string();
+                let mut parts = value.split(';');
+                if let Some(first) = parts.next() {
+                    if !first.is_empty() {
+                        plugin = Some(first.to_string());
+                    }
+                }
+                let rest: Vec<&str> = parts.collect();
+                if !rest.is_empty() {
+                    plugin_opts = Some(rest.join(";"));
+                }
+            }
+        }
+    }
+
+    let mut userinfo = None;
+    let mut hostport = None;
+    if let Some(at_idx) = content.rfind('@') {
+        userinfo = Some(content[..at_idx].to_string());
+        hostport = Some(content[at_idx + 1..].to_string());
+    } else {
+        if let Some(decoded) = decode_base64(content) {
+            if let Ok(decoded) = String::from_utf8(decoded) {
+                if let Some(at_idx) = decoded.rfind('@') {
+                    userinfo = Some(decoded[..at_idx].to_string());
+                    hostport = Some(decoded[at_idx + 1..].to_string());
+                }
+            }
+        }
+    }
+
+    let userinfo = userinfo?;
+    let hostport = hostport?;
+    let (cipher, password) = if userinfo.contains(':') {
+        let mut parts = userinfo.splitn(2, ':');
+        (parts.next()?.to_string(), parts.next()?.to_string())
+    } else if let Some(decoded) = decode_base64(&userinfo) {
+        let decoded = String::from_utf8(decoded).ok()?;
+        let mut parts = decoded.splitn(2, ':');
+        (parts.next()?.to_string(), parts.next()?.to_string())
+    } else {
+        return None;
+    };
+
+    let (server, port) = if hostport.starts_with('[') {
+        let end = hostport.find(']')?;
+        let host = hostport[1..end].to_string();
+        let port_str = hostport.get(end + 2..)?;
+        (host, port_str.parse::<u16>().ok()?)
+    } else {
+        let idx = hostport.rfind(':')?;
+        let host = hostport[..idx].to_string();
+        let port_str = &hostport[idx + 1..];
+        (host, port_str.parse::<u16>().ok()?)
+    };
+
+    let name = name.unwrap_or_else(|| format!("{}:{}", server, port));
+
+    let mut map = serde_yaml::Mapping::new();
+    map.insert(
+        serde_yaml::Value::String("name".to_string()),
+        serde_yaml::Value::String(name.clone()),
+    );
+    map.insert(
+        serde_yaml::Value::String("type".to_string()),
+        serde_yaml::Value::String("ss".to_string()),
+    );
+    map.insert(
+        serde_yaml::Value::String("server".to_string()),
+        serde_yaml::Value::String(server),
+    );
+    map.insert(
+        serde_yaml::Value::String("port".to_string()),
+        serde_yaml::Value::Number(port.into()),
+    );
+    map.insert(
+        serde_yaml::Value::String("cipher".to_string()),
+        serde_yaml::Value::String(cipher),
+    );
+    map.insert(
+        serde_yaml::Value::String("password".to_string()),
+        serde_yaml::Value::String(password),
+    );
+    if let Some(plugin) = plugin {
+        map.insert(
+            serde_yaml::Value::String("plugin".to_string()),
+            serde_yaml::Value::String(plugin),
+        );
+    }
+    if let Some(opts) = plugin_opts {
+        map.insert(
+            serde_yaml::Value::String("plugin-opts".to_string()),
+            serde_yaml::Value::String(opts),
+        );
+    }
+
+    Some(ProxySpec { name, map })
+}
+
+fn parse_bool(value: &str) -> Option<bool> {
+    match value.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn parse_vmess_url(line: &str) -> Option<ProxySpec> {
+    let content = line.trim().strip_prefix("vmess://")?;
+    let decoded = decode_base64(content)?;
+    let json: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
+
+    let get_str = |key: &str| {
+        json.get(key).and_then(|v| match v {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        })
+    };
+
+    let server = get_str("add")?;
+    let port: u16 = get_str("port")?.parse().ok()?;
+    let uuid = get_str("id")?;
+    let name = get_str("ps")
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("{}:{}", server, port));
+    let alter_id = get_str("aid").and_then(|v| v.parse::<u16>().ok());
+    let cipher = get_str("scy")
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "auto".to_string());
+    let network = get_str("net").or_else(|| get_str("network"));
+    let tls = get_str("tls").unwrap_or_default();
+    let sni = get_str("sni").or_else(|| get_str("host"));
+    let alpn = get_str("alpn");
+    let host = get_str("host");
+    let path = get_str("path");
+
+    let mut map = serde_yaml::Mapping::new();
+    map.insert(
+        serde_yaml::Value::String("name".to_string()),
+        serde_yaml::Value::String(name.clone()),
+    );
+    map.insert(
+        serde_yaml::Value::String("type".to_string()),
+        serde_yaml::Value::String("vmess".to_string()),
+    );
+    map.insert(
+        serde_yaml::Value::String("server".to_string()),
+        serde_yaml::Value::String(server),
+    );
+    map.insert(
+        serde_yaml::Value::String("port".to_string()),
+        serde_yaml::Value::Number(port.into()),
+    );
+    map.insert(
+        serde_yaml::Value::String("uuid".to_string()),
+        serde_yaml::Value::String(uuid),
+    );
+    map.insert(
+        serde_yaml::Value::String("cipher".to_string()),
+        serde_yaml::Value::String(cipher),
+    );
+    if let Some(alter_id) = alter_id {
+        map.insert(
+            serde_yaml::Value::String("alterId".to_string()),
+            serde_yaml::Value::Number(alter_id.into()),
+        );
+    }
+    if let Some(network) = network.clone().filter(|n| !n.is_empty()) {
+        map.insert(
+            serde_yaml::Value::String("network".to_string()),
+            serde_yaml::Value::String(network.clone()),
+        );
+    }
+    if !tls.is_empty() && tls != "none" {
+        map.insert(
+            serde_yaml::Value::String("tls".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
+    }
+    if let Some(sni) = sni {
+        map.insert(
+            serde_yaml::Value::String("servername".to_string()),
+            serde_yaml::Value::String(sni),
+        );
+    }
+    if let Some(alpn) = alpn {
+        let list = alpn
+            .split(',')
+            .map(|s| serde_yaml::Value::String(s.trim().to_string()))
+            .collect::<Vec<_>>();
+        if !list.is_empty() {
+            map.insert(
+                serde_yaml::Value::String("alpn".to_string()),
+                serde_yaml::Value::Sequence(list),
+            );
+        }
+    }
+
+    if network.as_deref() == Some("ws") {
+        let mut ws = serde_yaml::Mapping::new();
+        if let Some(path) = path {
+            ws.insert(
+                serde_yaml::Value::String("path".to_string()),
+                serde_yaml::Value::String(path),
+            );
+        }
+        if let Some(host) = host {
+            let mut headers = serde_yaml::Mapping::new();
+            headers.insert(
+                serde_yaml::Value::String("Host".to_string()),
+                serde_yaml::Value::String(host),
+            );
+            ws.insert(
+                serde_yaml::Value::String("headers".to_string()),
+                serde_yaml::Value::Mapping(headers),
+            );
+        }
+        if !ws.is_empty() {
+            map.insert(
+                serde_yaml::Value::String("ws-opts".to_string()),
+                serde_yaml::Value::Mapping(ws),
+            );
+        }
+    } else if network.as_deref() == Some("grpc") {
+        let mut grpc = serde_yaml::Mapping::new();
+        if let Some(service) = path {
+            grpc.insert(
+                serde_yaml::Value::String("grpc-service-name".to_string()),
+                serde_yaml::Value::String(service),
+            );
+        }
+        if !grpc.is_empty() {
+            map.insert(
+                serde_yaml::Value::String("grpc-opts".to_string()),
+                serde_yaml::Value::Mapping(grpc),
+            );
+        }
+    }
+
+    Some(ProxySpec { name, map })
+}
+
+fn parse_vless_url(line: &str) -> Option<ProxySpec> {
+    let url = Url::parse(line).ok()?;
+    if url.scheme() != "vless" {
+        return None;
+    }
+    let uuid = url.username().to_string();
+    if uuid.is_empty() {
+        return None;
+    }
+    let server = url.host_str()?.to_string();
+    let port = url.port()?;
+    let name = url
+        .fragment()
+        .map(percent_decode)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("{}:{}", server, port));
+
+    let mut params = std::collections::HashMap::new();
+    for (key, value) in url::form_urlencoded::parse(url.query().unwrap_or("").as_bytes()) {
+        params.insert(key.to_string(), value.to_string());
+    }
+
+    let network = params
+        .get("type")
+        .cloned()
+        .or_else(|| params.get("network").cloned());
+    let security = params
+        .get("security")
+        .cloned()
+        .unwrap_or_else(|| "none".to_string());
+    let sni = params
+        .get("sni")
+        .cloned()
+        .or_else(|| params.get("peer").cloned());
+    let alpn = params.get("alpn").cloned();
+    let flow = params.get("flow").cloned();
+    let encryption = params.get("encryption").cloned();
+    let udp = params
+        .get("udp")
+        .and_then(|v| parse_bool(v))
+        .unwrap_or(false);
+
+    let mut map = serde_yaml::Mapping::new();
+    map.insert(
+        serde_yaml::Value::String("name".to_string()),
+        serde_yaml::Value::String(name.clone()),
+    );
+    map.insert(
+        serde_yaml::Value::String("type".to_string()),
+        serde_yaml::Value::String("vless".to_string()),
+    );
+    map.insert(
+        serde_yaml::Value::String("server".to_string()),
+        serde_yaml::Value::String(server),
+    );
+    map.insert(
+        serde_yaml::Value::String("port".to_string()),
+        serde_yaml::Value::Number((port as u16).into()),
+    );
+    map.insert(
+        serde_yaml::Value::String("uuid".to_string()),
+        serde_yaml::Value::String(uuid),
+    );
+    map.insert(
+        serde_yaml::Value::String("udp".to_string()),
+        serde_yaml::Value::Bool(udp),
+    );
+    if let Some(network) = network.clone().filter(|n| !n.is_empty()) {
+        map.insert(
+            serde_yaml::Value::String("network".to_string()),
+            serde_yaml::Value::String(network.clone()),
+        );
+    }
+    if let Some(flow) = flow {
+        map.insert(
+            serde_yaml::Value::String("flow".to_string()),
+            serde_yaml::Value::String(flow),
+        );
+    }
+    if let Some(encryption) = encryption {
+        map.insert(
+            serde_yaml::Value::String("encryption".to_string()),
+            serde_yaml::Value::String(encryption),
+        );
+    }
+    if security != "none" {
+        map.insert(
+            serde_yaml::Value::String("tls".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
+    }
+    if let Some(sni) = sni {
+        map.insert(
+            serde_yaml::Value::String("servername".to_string()),
+            serde_yaml::Value::String(sni),
+        );
+    }
+    if let Some(alpn) = alpn {
+        let list = alpn
+            .split(',')
+            .map(|s| serde_yaml::Value::String(s.trim().to_string()))
+            .collect::<Vec<_>>();
+        if !list.is_empty() {
+            map.insert(
+                serde_yaml::Value::String("alpn".to_string()),
+                serde_yaml::Value::Sequence(list),
+            );
+        }
+    }
+
+    if security == "reality" {
+        let mut reality = serde_yaml::Mapping::new();
+        if let Some(pbk) = params
+            .get("pbk")
+            .cloned()
+            .or_else(|| params.get("public-key").cloned())
+        {
+            reality.insert(
+                serde_yaml::Value::String("public-key".to_string()),
+                serde_yaml::Value::String(pbk),
+            );
+        }
+        if let Some(sid) = params
+            .get("sid")
+            .cloned()
+            .or_else(|| params.get("short-id").cloned())
+        {
+            reality.insert(
+                serde_yaml::Value::String("short-id".to_string()),
+                serde_yaml::Value::String(sid),
+            );
+        }
+        if let Some(spx) = params
+            .get("spx")
+            .cloned()
+            .or_else(|| params.get("spider-x").cloned())
+        {
+            reality.insert(
+                serde_yaml::Value::String("spider-x".to_string()),
+                serde_yaml::Value::String(spx),
+            );
+        }
+        if let Some(fp) = params.get("fp").cloned() {
+            reality.insert(
+                serde_yaml::Value::String("fingerprint".to_string()),
+                serde_yaml::Value::String(fp),
+            );
+        }
+        if !reality.is_empty() {
+            map.insert(
+                serde_yaml::Value::String("reality-opts".to_string()),
+                serde_yaml::Value::Mapping(reality),
+            );
+        }
+    }
+
+    if network.as_deref() == Some("ws") {
+        let mut ws = serde_yaml::Mapping::new();
+        if let Some(path) = params.get("path") {
+            ws.insert(
+                serde_yaml::Value::String("path".to_string()),
+                serde_yaml::Value::String(path.clone()),
+            );
+        }
+        if let Some(host) = params.get("host") {
+            let mut headers = serde_yaml::Mapping::new();
+            headers.insert(
+                serde_yaml::Value::String("Host".to_string()),
+                serde_yaml::Value::String(host.clone()),
+            );
+            ws.insert(
+                serde_yaml::Value::String("headers".to_string()),
+                serde_yaml::Value::Mapping(headers),
+            );
+        }
+        if !ws.is_empty() {
+            map.insert(
+                serde_yaml::Value::String("ws-opts".to_string()),
+                serde_yaml::Value::Mapping(ws),
+            );
+        }
+    } else if network.as_deref() == Some("grpc") {
+        let mut grpc = serde_yaml::Mapping::new();
+        let service_name = params
+            .get("serviceName")
+            .cloned()
+            .or_else(|| params.get("service").cloned())
+            .or_else(|| params.get("path").cloned());
+        if let Some(service) = service_name {
+            grpc.insert(
+                serde_yaml::Value::String("grpc-service-name".to_string()),
+                serde_yaml::Value::String(service),
+            );
+        }
+        if !grpc.is_empty() {
+            map.insert(
+                serde_yaml::Value::String("grpc-opts".to_string()),
+                serde_yaml::Value::Mapping(grpc),
+            );
+        }
+    }
+
+    Some(ProxySpec { name, map })
+}
+
+fn parse_trojan_url(line: &str) -> Option<ProxySpec> {
+    let url = Url::parse(line).ok()?;
+    if url.scheme() != "trojan" {
+        return None;
+    }
+    let password = url.username().to_string();
+    if password.is_empty() {
+        return None;
+    }
+    let server = url.host_str()?.to_string();
+    let port = url.port()?;
+    let name = url
+        .fragment()
+        .map(percent_decode)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("{}:{}", server, port));
+
+    let mut params = std::collections::HashMap::new();
+    for (key, value) in url::form_urlencoded::parse(url.query().unwrap_or("").as_bytes()) {
+        params.insert(key.to_string(), value.to_string());
+    }
+
+    let network = params
+        .get("type")
+        .cloned()
+        .or_else(|| params.get("network").cloned());
+    let sni = params
+        .get("sni")
+        .cloned()
+        .or_else(|| params.get("peer").cloned());
+    let alpn = params.get("alpn").cloned();
+    let udp = params
+        .get("udp")
+        .and_then(|v| parse_bool(v))
+        .unwrap_or(false);
+    let skip_cert = params
+        .get("allowInsecure")
+        .or_else(|| params.get("skip-cert-verify"))
+        .and_then(|v| parse_bool(v))
+        .unwrap_or(false);
+
+    let mut map = serde_yaml::Mapping::new();
+    map.insert(
+        serde_yaml::Value::String("name".to_string()),
+        serde_yaml::Value::String(name.clone()),
+    );
+    map.insert(
+        serde_yaml::Value::String("type".to_string()),
+        serde_yaml::Value::String("trojan".to_string()),
+    );
+    map.insert(
+        serde_yaml::Value::String("server".to_string()),
+        serde_yaml::Value::String(server),
+    );
+    map.insert(
+        serde_yaml::Value::String("port".to_string()),
+        serde_yaml::Value::Number((port as u16).into()),
+    );
+    map.insert(
+        serde_yaml::Value::String("password".to_string()),
+        serde_yaml::Value::String(password),
+    );
+    map.insert(
+        serde_yaml::Value::String("udp".to_string()),
+        serde_yaml::Value::Bool(udp),
+    );
+    if skip_cert {
+        map.insert(
+            serde_yaml::Value::String("skip-cert-verify".to_string()),
+            serde_yaml::Value::Bool(true),
+        );
+    }
+    if let Some(network) = network.clone().filter(|n| !n.is_empty()) {
+        map.insert(
+            serde_yaml::Value::String("network".to_string()),
+            serde_yaml::Value::String(network.clone()),
+        );
+    }
+    if let Some(sni) = sni {
+        map.insert(
+            serde_yaml::Value::String("sni".to_string()),
+            serde_yaml::Value::String(sni),
+        );
+    }
+    if let Some(alpn) = alpn {
+        let list = alpn
+            .split(',')
+            .map(|s| serde_yaml::Value::String(s.trim().to_string()))
+            .collect::<Vec<_>>();
+        if !list.is_empty() {
+            map.insert(
+                serde_yaml::Value::String("alpn".to_string()),
+                serde_yaml::Value::Sequence(list),
+            );
+        }
+    }
+
+    if network.as_deref() == Some("ws") {
+        let mut ws = serde_yaml::Mapping::new();
+        if let Some(path) = params.get("path") {
+            ws.insert(
+                serde_yaml::Value::String("path".to_string()),
+                serde_yaml::Value::String(path.clone()),
+            );
+        }
+        if let Some(host) = params.get("host") {
+            let mut headers = serde_yaml::Mapping::new();
+            headers.insert(
+                serde_yaml::Value::String("Host".to_string()),
+                serde_yaml::Value::String(host.clone()),
+            );
+            ws.insert(
+                serde_yaml::Value::String("headers".to_string()),
+                serde_yaml::Value::Mapping(headers),
+            );
+        }
+        if !ws.is_empty() {
+            map.insert(
+                serde_yaml::Value::String("ws-opts".to_string()),
+                serde_yaml::Value::Mapping(ws),
+            );
+        }
+    } else if network.as_deref() == Some("grpc") {
+        let mut grpc = serde_yaml::Mapping::new();
+        if let Some(service) = params.get("serviceName") {
+            grpc.insert(
+                serde_yaml::Value::String("grpc-service-name".to_string()),
+                serde_yaml::Value::String(service.clone()),
+            );
+        }
+        if !grpc.is_empty() {
+            map.insert(
+                serde_yaml::Value::String("grpc-opts".to_string()),
+                serde_yaml::Value::Mapping(grpc),
+            );
+        }
+    }
+
+    Some(ProxySpec { name, map })
+}
+
+fn parse_raw_subscription(bytes: &[u8]) -> Vec<ProxySpec> {
+    let mut proxies = Vec::new();
+    for line in extract_subscription_lines(bytes) {
+        if let Some(proxy) = parse_ss_url(&line) {
+            proxies.push(proxy);
+            continue;
+        }
+        if let Some(proxy) = parse_vmess_url(&line) {
+            proxies.push(proxy);
+            continue;
+        }
+        if let Some(proxy) = parse_vless_url(&line) {
+            proxies.push(proxy);
+            continue;
+        }
+        if let Some(proxy) = parse_trojan_url(&line) {
+            proxies.push(proxy);
+        }
+    }
+    proxies
+}
+
+fn convert_raw_subscription_to_config(
+    raw_bytes: &[u8],
+    base_config_path: &Path,
+) -> Result<(Vec<u8>, usize), String> {
+    let proxies = parse_raw_subscription(raw_bytes);
+    if proxies.is_empty() {
+        return Err("Unsupported raw subscription format".to_string());
+    }
+    let base_bytes = std::fs::read(base_config_path)
+        .map_err(|e| format!("Failed to read base config: {}", e))?;
+    let output = apply_proxies_to_config(&base_bytes, &proxies)?;
+    Ok((output, proxies.len()))
+}
+
+fn proxy_specs_to_yaml(proxies: &[ProxySpec]) -> serde_yaml::Value {
+    let mut items = Vec::new();
+    for proxy in proxies {
+        items.push(serde_yaml::Value::Mapping(proxy.map.clone()));
+    }
+    serde_yaml::Value::Sequence(items)
+}
+
+fn apply_proxies_to_config(base_bytes: &[u8], proxies: &[ProxySpec]) -> Result<Vec<u8>, String> {
+    let mut config_value: serde_yaml::Value = serde_yaml::from_slice(base_bytes)
+        .unwrap_or_else(|_| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+
+    let config_map = match config_value.as_mapping_mut() {
+        Some(map) => map,
+        None => {
+            config_value = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+            config_value.as_mapping_mut().unwrap()
+        }
+    };
+
+    config_map.insert(
+        serde_yaml::Value::String("proxies".to_string()),
+        proxy_specs_to_yaml(proxies),
+    );
+
+    let proxy_names: Vec<String> = proxies.iter().map(|p| p.name.clone()).collect();
+    let mut group_names = Vec::new();
+
+    if let Some(serde_yaml::Value::Sequence(groups)) =
+        config_map.get(&serde_yaml::Value::String("proxy-groups".to_string()))
+    {
+        for group in groups {
+            if let Some(name) = group
+                .as_mapping()
+                .and_then(|map| map.get(&serde_yaml::Value::String("name".to_string())))
+                .and_then(|v| v.as_str())
+            {
+                group_names.push(name.to_string());
+            }
+        }
+    }
+
+    let special = ["DIRECT", "REJECT", "REJECT-DROP", "PASS", "GLOBAL"];
+
+    if let Some(serde_yaml::Value::Sequence(groups)) =
+        config_map.get_mut(&serde_yaml::Value::String("proxy-groups".to_string()))
+    {
+        for group in groups {
+            let group_map = match group.as_mapping_mut() {
+                Some(map) => map,
+                None => continue,
+            };
+            let proxies_value =
+                match group_map.get(&serde_yaml::Value::String("proxies".to_string())) {
+                    Some(serde_yaml::Value::Sequence(list)) => list.clone(),
+                    _ => continue,
+                };
+
+            let mut has_proxy_entries = false;
+            for entry in &proxies_value {
+                if let Some(name) = entry.as_str() {
+                    let is_group = group_names.iter().any(|g| g == name);
+                    let is_special = special.iter().any(|s| s == &name);
+                    if !is_group && !is_special {
+                        has_proxy_entries = true;
+                        break;
+                    }
+                }
+            }
+
+            if !has_proxy_entries {
+                continue;
+            }
+
+            let mut new_list = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+
+            for entry in proxies_value {
+                if let Some(name) = entry.as_str() {
+                    let is_group = group_names.iter().any(|g| g == name);
+                    let is_special = special.iter().any(|s| s == &name);
+                    if is_group || is_special {
+                        if seen.insert(name.to_string()) {
+                            new_list.push(serde_yaml::Value::String(name.to_string()));
+                        }
+                    }
+                }
+            }
+
+            for name in &proxy_names {
+                if seen.insert(name.clone()) {
+                    new_list.push(serde_yaml::Value::String(name.clone()));
+                }
+            }
+
+            group_map.insert(
+                serde_yaml::Value::String("proxies".to_string()),
+                serde_yaml::Value::Sequence(new_list),
+            );
+        }
+    }
+
+    serde_yaml::to_string(&config_value)
+        .map(|s| s.into_bytes())
+        .map_err(|e| format!("Failed to serialize config: {}", e))
 }
 
 pub async fn run(
@@ -442,6 +1365,13 @@ async fn run_app<B: ratatui::backend::Backend>(
                     } else if update_total > 0 {
                         state.status_message =
                             Some(format!("Updating... ({}/{})", completed, update_total));
+                    }
+
+                    if update_in_flight == 0 && update_total > 0 {
+                        refresh_update_providers(state, config, &mut update_providers).await;
+                        update_selected_index =
+                            update_selected_index.min(update_providers.len().saturating_sub(1));
+                        update_total = 0;
                     }
                 }
             }
@@ -652,6 +1582,10 @@ async fn run_app<B: ratatui::backend::Backend>(
                         KeyCode::Char('g') => {
                             state.current_page = Page::Routes;
                             selected_route_index = 0;
+                            selected_node_index = 0;
+                            routes_expanded = false;
+                            let _ = state.refresh().await;
+                            last_refresh = std::time::Instant::now();
                         }
                         KeyCode::Char('l') => {
                             state.current_page = Page::Rules;
@@ -737,6 +1671,22 @@ async fn run_app<B: ratatui::backend::Backend>(
                                     state.current_page = Page::Home;
                                 }
                                 KeyCode::Char('h') => state.current_page = Page::Home,
+                                KeyCode::Char('r') => {
+                                    state.status_message = Some("Refreshing routes...".to_string());
+                                    match state.refresh().await {
+                                        Ok(()) => {
+                                            routes_expanded = false;
+                                            selected_route_index = 0;
+                                            selected_node_index = 0;
+                                            state.status_message =
+                                                Some("Routes refreshed".to_string());
+                                        }
+                                        Err(e) => {
+                                            state.status_message =
+                                                Some(format!("Refresh failed: {}", e));
+                                        }
+                                    }
+                                }
                                 KeyCode::Char('p')
                                     if key.modifiers.contains(KeyModifiers::CONTROL) =>
                                 {
@@ -1152,6 +2102,330 @@ async fn run_app<B: ratatui::backend::Backend>(
                                 } else {
                                     state.status_message =
                                         Some("No subscriptions to update".to_string());
+                                }
+                            }
+                            KeyCode::Char('s') => {
+                                // Switch current subscription (Mihomo Party)
+                                if update_selected_index < update_providers.len() {
+                                    let item = update_providers[update_selected_index].clone();
+                                    debug_log(&format!(
+                                        "switch start name='{}' type='{}' url_present={}",
+                                        item.name,
+                                        item.provider_type,
+                                        item.url.is_some()
+                                    ));
+                                    match &item.source {
+                                        SubscriptionSource::MihomoPartyProfile {
+                                            id,
+                                            profile_path,
+                                            list_path,
+                                        } => {
+                                            debug_log(&format!(
+                                                "switch profile id={} path={} list={}",
+                                                id,
+                                                profile_path.display(),
+                                                list_path.display()
+                                            ));
+                                            let work_config_path =
+                                                mihomo_party::work_config_path_from_list(list_path)
+                                                    .unwrap_or_else(|| {
+                                                        list_path
+                                                            .parent()
+                                                            .unwrap_or_else(|| Path::new("."))
+                                                            .join("work")
+                                                            .join("config.yaml")
+                                                    });
+                                            if !profile_path.is_file() {
+                                                if let Some(url) = item.url.as_deref() {
+                                                    if is_http_url(url) {
+                                                        if let Err(e) = update_mihomo_party_profile(
+                                                            id,
+                                                            url,
+                                                            profile_path,
+                                                            list_path,
+                                                        )
+                                                        .await
+                                                        {
+                                                            state.status_message = Some(format!(
+                                                                "Failed to download subscription: {}",
+                                                                e
+                                                            ));
+                                                            debug_log(&format!(
+                                                                "switch update_profile failed: {}",
+                                                                e
+                                                            ));
+                                                            continue;
+                                                        }
+                                                    } else {
+                                                        let bytes = match std::fs::read(url) {
+                                                            Ok(bytes) => bytes,
+                                                            Err(e) => {
+                                                                state.status_message = Some(
+                                                                    format!(
+                                                                        "Failed to read subscription file: {}",
+                                                                        e
+                                                                    ),
+                                                                );
+                                                                debug_log(&format!(
+                                                                    "switch read file failed: {}",
+                                                                    e
+                                                                ));
+                                                                continue;
+                                                            }
+                                                        };
+                                                        if let Some(parent) = profile_path.parent()
+                                                        {
+                                                            let _ = std::fs::create_dir_all(parent);
+                                                        }
+                                                        if let Err(e) =
+                                                            std::fs::write(profile_path, &bytes)
+                                                        {
+                                                            state.status_message = Some(format!(
+                                                                "Failed to write profile: {}",
+                                                                e
+                                                            ));
+                                                            debug_log(&format!(
+                                                                "switch write profile failed: {}",
+                                                                e
+                                                            ));
+                                                            continue;
+                                                        }
+                                                        let updated_at =
+                                                            Utc::now().timestamp_millis();
+                                                        let _ =
+                                                            mihomo_party::update_profile_updated_at(
+                                                                list_path, id, updated_at,
+                                                            );
+                                                    }
+                                                } else {
+                                                    state.status_message = Some(
+                                                        "Profile file not found, please update first"
+                                                            .to_string(),
+                                                    );
+                                                    debug_log("switch profile missing");
+                                                    continue;
+                                                }
+                                            }
+
+                                            let bytes = match std::fs::read(profile_path) {
+                                                Ok(bytes) => bytes,
+                                                Err(e) => {
+                                                    state.status_message = Some(format!(
+                                                        "Failed to read profile: {}",
+                                                        e
+                                                    ));
+                                                    debug_log(&format!(
+                                                        "switch read profile failed: {}",
+                                                        e
+                                                    ));
+                                                    continue;
+                                                }
+                                            };
+
+                                            let mut applied_proxy_count = None;
+                                            let output_bytes = if looks_like_clash_config(&bytes) {
+                                                debug_log(&format!(
+                                                    "switch profile looks_like_config bytes={}",
+                                                    bytes.len()
+                                                ));
+                                                bytes
+                                            } else {
+                                                debug_log(&format!(
+                                                    "switch profile raw bytes={}",
+                                                    bytes.len()
+                                                ));
+                                                match convert_raw_subscription_to_config(
+                                                    &bytes,
+                                                    &work_config_path,
+                                                ) {
+                                                    Ok((output, count)) => {
+                                                        applied_proxy_count = Some(count);
+                                                        debug_log(&format!(
+                                                            "switch raw converted count={} output_bytes={}",
+                                                            count,
+                                                            output.len()
+                                                        ));
+                                                        output
+                                                    }
+                                                    Err(e) => {
+                                                        state.status_message = Some(e);
+                                                        debug_log("switch raw convert failed");
+                                                        continue;
+                                                    }
+                                                }
+                                            };
+
+                                            if applied_proxy_count.is_some() {
+                                                let _ = std::fs::write(profile_path, &output_bytes);
+                                            }
+
+                                            if let Some(parent) = work_config_path.parent() {
+                                                let _ = std::fs::create_dir_all(parent);
+                                            }
+                                            if let Err(e) =
+                                                std::fs::write(&work_config_path, &output_bytes)
+                                            {
+                                                state.status_message = Some(format!(
+                                                    "Failed to apply subscription: {}",
+                                                    e
+                                                ));
+                                                debug_log(&format!(
+                                                    "switch write work config failed: {}",
+                                                    e
+                                                ));
+                                                continue;
+                                            }
+
+                                            let path_str =
+                                                work_config_path.to_string_lossy().to_string();
+                                            let temp_path = work_config_path
+                                                .with_file_name("config.switch.yaml");
+                                            let temp_path_str =
+                                                temp_path.to_string_lossy().to_string();
+
+                                            let mut reload_result: Option<
+                                                Result<(), anyhow::Error>,
+                                            > = None;
+                                            if std::fs::write(&temp_path, &output_bytes).is_ok() {
+                                                if state
+                                                    .clash_state
+                                                    .client
+                                                    .reload_config_path(&temp_path_str)
+                                                    .await
+                                                    .is_ok()
+                                                {
+                                                    debug_log("switch temp path reload ok");
+                                                    reload_result = Some(
+                                                        state
+                                                            .clash_state
+                                                            .client
+                                                            .reload_config_path(&path_str)
+                                                            .await,
+                                                    );
+                                                }
+                                                let _ = std::fs::remove_file(&temp_path);
+                                            }
+
+                                            let reload_result = match reload_result {
+                                                Some(result) => result,
+                                                None => {
+                                                    state
+                                                        .clash_state
+                                                        .client
+                                                        .reload_config_path(&path_str)
+                                                        .await
+                                                }
+                                            };
+
+                                            match reload_result {
+                                                Ok(()) => {
+                                                    debug_log("switch reload ok");
+                                                    let _ = mihomo_party::set_current_profile(
+                                                        list_path, id,
+                                                    );
+                                                    for provider in update_providers.iter_mut() {
+                                                        provider.is_current = matches!(
+                                                            &provider.source,
+                                                            SubscriptionSource::MihomoPartyProfile { id: pid, .. }
+                                                                if pid == id
+                                                        );
+                                                    }
+
+                                                    let _ = state.refresh().await;
+                                                    match state.clash_state.client.get_rules().await
+                                                    {
+                                                        Ok(rules_response) => {
+                                                            rules_data = rules_response.rules;
+                                                            debug_log(&format!(
+                                                                "switch rules_count={}",
+                                                                rules_data.len()
+                                                            ));
+                                                        }
+                                                        Err(e) => {
+                                                            debug_log(&format!(
+                                                                "switch rules fetch failed: {}",
+                                                                e
+                                                            ));
+                                                        }
+                                                    }
+                                                    if let Some(group) =
+                                                        state.clash_state.proxies.get("🔰 节点选择")
+                                                    {
+                                                        if let Some(all) = &group.all {
+                                                            debug_log(&format!(
+                                                                "switch refresh group_nodes={}",
+                                                                all.len()
+                                                            ));
+                                                            let sample: Vec<String> = all
+                                                                .iter()
+                                                                .take(5)
+                                                                .cloned()
+                                                                .collect();
+                                                            debug_log(&format!(
+                                                                "switch group_nodes_sample={:?}",
+                                                                sample
+                                                            ));
+                                                        }
+                                                    }
+                                                    debug_log(&format!(
+                                                        "switch proxies_count={}",
+                                                        state.clash_state.proxies.len()
+                                                    ));
+                                                    refresh_update_providers(
+                                                        state,
+                                                        config,
+                                                        &mut update_providers,
+                                                    )
+                                                    .await;
+                                                    routes_expanded = false;
+                                                    selected_route_index = 0;
+                                                    selected_node_index = 0;
+                                                    update_selected_index = update_selected_index
+                                                        .min(
+                                                            update_providers
+                                                                .len()
+                                                                .saturating_sub(1),
+                                                        );
+                                                    last_refresh = std::time::Instant::now();
+                                                    let status =
+                                                        if let Some(count) = applied_proxy_count {
+                                                            format!(
+                                                            "Switched to {} ({} proxies, {} rules)",
+                                                            item.name,
+                                                            count,
+                                                            rules_data.len()
+                                                        )
+                                                        } else {
+                                                            format!(
+                                                                "Switched to {} ({} rules)",
+                                                                item.name,
+                                                                rules_data.len()
+                                                            )
+                                                        };
+                                                    state.status_message = Some(status);
+                                                }
+                                                Err(e) => {
+                                                    state.status_message = Some(format!(
+                                                        "Failed to reload Clash config: {}",
+                                                        e
+                                                    ));
+                                                    debug_log(&format!(
+                                                        "switch reload failed: {}",
+                                                        e
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            state.status_message = Some(
+                                                "Only Mihomo Party profiles support switching"
+                                                    .to_string(),
+                                            );
+                                        }
+                                    }
+                                } else {
+                                    state.status_message =
+                                        Some("No subscriptions to switch".to_string());
                                 }
                             }
                             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {

@@ -27,6 +27,7 @@ pub struct SubscriptionItem {
     pub url: Option<String>,
     pub proxy_count: usize,
     pub updated_at: Option<String>,
+    pub is_current: bool,
     pub source: SubscriptionSource,
 }
 
@@ -209,6 +210,11 @@ fn render_providers(
                         Color::DarkGray
                     }),
                 ),
+                Span::raw(if item.is_current { "  " } else { "" }),
+                Span::styled(
+                    if item.is_current { "[current]" } else { "" },
+                    Style::default().fg(Color::Magenta),
+                ),
             ]);
 
             let line2 = Line::from(vec![
@@ -247,6 +253,8 @@ fn render_help(f: &mut Frame, area: Rect) {
         Span::raw(" Select  "),
         Span::styled("Enter", Style::default().fg(Color::Yellow)),
         Span::raw(" Update Selected  "),
+        Span::styled("s", Style::default().fg(Color::Yellow)),
+        Span::raw(" Set Current  "),
         Span::styled("u", Style::default().fg(Color::Yellow)),
         Span::raw(" Update All  "),
         Span::styled("r", Style::default().fg(Color::Yellow)),

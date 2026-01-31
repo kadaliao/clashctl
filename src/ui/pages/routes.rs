@@ -213,6 +213,10 @@ fn render_nodes(
     let routes = HumanRoute::from_proxies(&state.clash_state.proxies, state.mode);
 
     if route_index >= routes.len() {
+        let empty = Paragraph::new("No routes available")
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL));
+        f.render_widget(empty, area);
         return;
     }
 

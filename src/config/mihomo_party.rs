@@ -101,6 +101,17 @@ pub fn update_profile_updated_at(list_path: &Path, id: &str, updated_at_ms: i64)
     list.save(list_path)
 }
 
+pub fn set_current_profile(list_path: &Path, id: &str) -> Result<()> {
+    let mut list = MihomoPartyProfileList::load(list_path)?;
+    list.current = Some(id.to_string());
+    list.save(list_path)
+}
+
+pub fn work_config_path_from_list(list_path: &Path) -> Option<PathBuf> {
+    let root = list_path.parent()?;
+    Some(root.join("work").join("config.yaml"))
+}
+
 pub fn count_proxies_in_profile(path: &Path) -> Option<usize> {
     let content = fs::read_to_string(path).ok()?;
     let value: serde_yaml::Value = serde_yaml::from_str(&content).ok()?;

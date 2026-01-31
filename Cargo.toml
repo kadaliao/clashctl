@@ -1,6 +1,6 @@
 [package]
 name = "clashctl"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["clashctl contributors"]
 description = "A simple-first TUI Clash controller"

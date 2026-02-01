@@ -231,12 +231,28 @@ fn render_nodes(
         return;
     }
 
+    let visible_items = area.height.saturating_sub(2).max(1) as usize;
+    let selected_index = node_index.min(nodes.len().saturating_sub(1));
+    let mut start_index = 0usize;
+    if nodes.len() > visible_items {
+        if selected_index >= visible_items {
+            start_index = selected_index + 1 - visible_items;
+        }
+        let max_start = nodes.len().saturating_sub(visible_items);
+        if start_index > max_start {
+            start_index = max_start;
+        }
+    }
+    let end_index = (start_index + visible_items).min(nodes.len());
+
     let items: Vec<ListItem> = nodes
         .iter()
         .enumerate()
+        .skip(start_index)
+        .take(end_index.saturating_sub(start_index))
         .map(|(i, node)| {
             let is_current = route.current_node.as_ref() == Some(node);
-            let is_selected = i == node_index;
+            let is_selected = i == selected_index;
             let is_testing = state.is_testing(node);
             let cached_delay = state.get_delay(node);
             let is_favorite = config.is_favorite(node);
@@ -306,14 +322,14 @@ fn render_nodes(
         format!(
             "{} - Nodes ({}/{}) - Press 't' to test",
             route.display_name(),
-            node_index + 1,
+            selected_index + 1,
             nodes.len()
         )
     } else {
         format!(
             "{} - Nodes ({}/{})",
             route.display_name(),
-            node_index + 1,
+            selected_index + 1,
             nodes.len()
         )
     };
@@ -346,7 +362,7 @@ fn render_help(f: &mut Frame, area: Rect, _mode: Mode, preset: &Preset, expanded
         }
 
         help_spans.extend(vec![
-            Span::styled("Esc/←", Style::default().fg(Color::Yellow)),
+            Span::styled("Esc/q/←", Style::default().fg(Color::Yellow)),
             Span::raw(" Back  "),
             Span::styled("h", Style::default().fg(Color::Yellow)),
             Span::raw(" Home"),
@@ -371,8 +387,8 @@ fn render_help(f: &mut Frame, area: Rect, _mode: Mode, preset: &Preset, expanded
         help_spans.extend(vec![
             Span::styled("h", Style::default().fg(Color::Yellow)),
             Span::raw(" Home  "),
-            Span::styled("q", Style::default().fg(Color::Yellow)),
-            Span::raw(" Quit"),
+            Span::styled("q/Esc", Style::default().fg(Color::Yellow)),
+            Span::raw(" Back"),
         ]);
     }
 

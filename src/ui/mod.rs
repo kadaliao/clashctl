@@ -1770,12 +1770,14 @@ async fn run_app<B: ratatui::backend::Backend>(
 
                             let route = &routes[selected_route_index];
                             let max_node_index = route.all_nodes.len().saturating_sub(1);
+                            if selected_node_index > max_node_index {
+                                selected_node_index = max_node_index;
+                            }
 
                             match key.code {
                                 KeyCode::Char('q') => {
-                                    // Return to Home instead of quitting
+                                    // Back to route list (same as Esc)
                                     routes_expanded = false;
-                                    state.current_page = Page::Home;
                                 }
                                 KeyCode::Esc | KeyCode::Left => {
                                     // Back to route list

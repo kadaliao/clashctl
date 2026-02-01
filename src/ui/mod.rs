@@ -2888,7 +2888,7 @@ fn render_header(f: &mut ratatui::Frame, area: ratatui::layout::Rect, theme: &Th
                 .add_modifier(ratatui::style::Modifier::BOLD),
         ),
         Span::styled(
-            " v0.1.2 - Simple-first TUI Clash Controller",
+            " v0.1.3 - Simple-first TUI Clash Controller",
             Style::default().fg(theme.text()),
         ),
         Span::styled(
